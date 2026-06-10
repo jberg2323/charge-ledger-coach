@@ -1,5 +1,5 @@
-import ChargeLedger from "../components/charge-ledger-coach";
+import LandingPage from "../components/landing-page";
 
 export default function Page() {
-  return <ChargeLedger />;
+  return <LandingPage />;
 }

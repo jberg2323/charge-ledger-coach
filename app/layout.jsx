@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Charge Ledger | Train Your Perception",
-  description: "A guided mental training tool with a live coach. Balance the charge. Own your mind.",
+  title: "Charge Ledger | Balance One Charged Relationship in 5 Rounds",
+  description: "Someone lives rent free in your head. An AI coach trained on the balancing protocol helps you own it, level it, and measure the shift. Free to start.",
 };
 
 export default function RootLayout({ children }) {

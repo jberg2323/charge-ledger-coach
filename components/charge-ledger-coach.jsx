@@ -1,6 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
+import GroundingModal from "./grounding-modal";
+import {
+  MIN_ENTRIES,
+  PHASES,
+  PHASE_LABELS,
+  TRAIT_CHIPS,
+  detectPatterns,
+  downloadLedgerExport,
+  getCompletionProceedStatus,
+  getPhaseProceedStatus,
+  getResumeSession,
+  loadSessions,
+  newSession,
+  phaseComplete,
+  phaseEntryCount,
+  saveSessions,
+  sessionProgress,
+} from "../lib/session-utils";
 
 // ----------------------------------------------------------------------
 // The Charge Ledger, with a live coach
@@ -70,19 +89,6 @@ function btnBase(extra = {}) {
   };
 }
 
-function sessionProgress(session) {
-  const e = session.entries;
-  const phaseScores = [
-    Math.min(e.own.length / MIN_ENTRIES, 1),
-    Math.min(Math.min(e.costs.length, e.benefits.length) / MIN_ENTRIES, 1),
-    Math.min(e.opposite.length / MIN_ENTRIES, 1),
-    Math.min(e.fantasy.length / MIN_ENTRIES, 1),
-    session.reflection.trim() ? 0.5 : 0,
-    session.done ? 0.5 : 0,
-  ];
-  return Math.round((phaseScores.reduce((a, b) => a + b, 0) / phaseScores.length) * 100);
-}
-
 function ProgressBar({ value, label, accent = T.volt }) {
   return (
     <div className="cl-ui" style={{ width: "100%" }}>
@@ -110,9 +116,6 @@ function ProgressBar({ value, label, accent = T.volt }) {
     </div>
   );
 }
-
-const STORAGE_KEY = "charge-ledger-sessions-v2";
-const MIN_ENTRIES = 3;
 
 // ------------------------------------------------------------- method brief
 // Distilled principles the coach reasons from. Written as instructions,
@@ -146,14 +149,6 @@ const MODE_INSTRUCTIONS = {
   stuck: `The person is stuck on the current phase. Give a one or two sentence reframe of what this phase is actually asking, tailored to their person and trait, then 3 pointed questions that would unlock a real entry. If they have entries already, build on them. If their entries cluster in one context (only work, only family), point the scan somewhere they have not looked.`,
   pressure: `Pressure test their entries for this phase. Check each for: episodic specificity (where, when, to whom), honesty (written to fill a row vs believed), and all or none language. In your message, name which numbered entries are strong and which are soft and why, briefly. Then give 2 or 3 sharpening questions aimed at the weakest entries.`,
   charge: `They have finished all phases and written a reflection on revisiting the memory. Read the reflection and the full ledger. Diagnose: is the charge dissolved, or does activation remain? If it remains, identify which phase is the likely weak point (generic owning, an unbalanced or unbelieved ledger, a forced synchronous opposite, an uncracked fantasy) and say why, referencing their entries. Then give 2 or 3 questions to reopen that phase. If it reads genuinely complete, say so plainly and name what shifted.`,
-};
-
-const PHASE_LABELS = {
-  own: "01 Own It: specific moments where you displayed the same trait",
-  balance: "02 Level It: real costs and benefits of the trait, columns must match",
-  opposite: "03 Find The Other Side: synchronous opposite present at the moment of charge",
-  fantasy: "04 Break The Fantasy: drawbacks if they had done the exact opposite",
-  completion: "05 The Charge Test: revisit the memory and assess remaining activation",
 };
 
 const CHAT_INSTRUCTIONS = `
@@ -293,88 +288,30 @@ async function askCoachChat(session, phaseKey, messages) {
   });
 }
 
-// ---------------------------------------------------------------- storage
-async function loadSessions() {
-  try {
-    if (typeof window === "undefined") return [];
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
+function ChargeSlider({ value, onChange, label, hint }) {
+  return (
+    <div className="cl-ui" style={{ marginTop: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray }}>{label}</span>
+        <span className="cl-display" style={{ fontSize: 28, fontWeight: 800, color: T.volt }}>{value ?? "—"}/10</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={10}
+        step={1}
+        value={value ?? 5}
+        onChange={(e) => onChange(Number(e.target.value))}
+        style={{ width: "100%", accentColor: T.volt }}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.grayDim, marginTop: 4 }}>
+        <span>Calm</span>
+        <span>Activated</span>
+      </div>
+      {hint && <p style={{ margin: "8px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>{hint}</p>}
+    </div>
+  );
 }
-async function saveSessions(sessions) {
-  try {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-  } catch (e) {
-    console.error("Save failed", e);
-  }
-}
-
-function newSession(person, trait, polarity) {
-  return {
-    id: String(Date.now()),
-    person,
-    trait,
-    polarity,
-    createdAt: new Date().toISOString(),
-    entries: { own: [], costs: [], benefits: [], opposite: [], fantasy: [] },
-    reflection: "",
-    done: false,
-    coachChat: [],
-  };
-}
-
-const PHASES = [
-  {
-    key: "own",
-    num: "01",
-    title: "Own It",
-    tagline: "Face the mirror",
-    question:
-      "Name real moments you did the same thing. Where, when, and to whom?",
-    coach:
-      "Vague does not count. One real place, one real date, one real person. Keep stacking reps until I would never do that stops being believable.",
-    placeholder: "March 2022, at dinner, to my partner, when I...",
-    scan: ["at work", "at home", "with family", "to a stranger", "online", "to yourself"],
-  },
-  {
-    key: "balance",
-    num: "02",
-    title: "Level It",
-    tagline: "Balance the ledger",
-    question:
-      "List the real costs and real benefits. Both columns must match before you advance.",
-    coach:
-      "You see one side clearly. That is the bias. Hunt the hidden column until the beam levels.",
-    scan: ["resilience built", "dependence avoided", "truth surfaced", "boundaries forced", "drive created", "discernment sharpened"],
-  },
-  {
-    key: "opposite",
-    num: "03",
-    title: "Find The Other Side",
-    tagline: "Widen the lens",
-    question:
-      "At the exact moment of the charge, who was showing you the opposite? Near or far, real or remembered.",
-    coach:
-      "If someone criticized you, who was for you in that same window? Write only what you can actually locate.",
-    placeholder: "While they tore into me, that morning someone had texted...",
-    scan: ["someone present", "someone far away", "a message or call", "a memory you held", "your own inner voice", "several people at once"],
-  },
-  {
-    key: "fantasy",
-    num: "04",
-    title: "Break The Fantasy",
-    tagline: "Price the ideal",
-    question:
-      "If they had done the exact opposite, what would that have cost you?",
-    coach:
-      "Pain lives in a one sided fantasy of what should have happened. Price it honestly.",
-    placeholder: "If they had always agreed with me, I would never have...",
-    scan: ["dependency", "arrested growth", "naivety", "lost drive", "softened standards", "a worse blind spot"],
-  },
-];
 
 // ---------------------------------------------------------------- beam
 function Beam({ left, right, label }) {
@@ -904,7 +841,7 @@ function PhaseBody({ phase, session, update }) {
 
   const key = phase.key;
   const list = ent[key];
-  const color = key === "own" ? T.heat : key === "opposite" ? T.cool : T.volt;
+  const color = key === "own" ? T.heat : key === "opposite" ? T.cool : key === "values" ? T.cool : T.volt;
   const remaining = Math.max(0, MIN_ENTRIES - list.length);
   return (
     <div style={{ background: T.surface, borderRadius: 16, padding: 20, border: `1px solid ${T.line}` }}>
@@ -924,66 +861,6 @@ function PhaseBody({ phase, session, update }) {
       </div>
     </div>
   );
-}
-
-function phaseComplete(phase, session) {
-  return getPhaseProceedStatus(phase, session).ready;
-}
-
-function phaseEntryCount(phase, session) {
-  const e = session.entries;
-  if (phase.key === "balance") return e.costs.length + e.benefits.length;
-  return e[phase.key].length;
-}
-
-function getPhaseProceedStatus(phase, session) {
-  const e = session.entries;
-
-  if (phase.key === "balance") {
-    const costs = e.costs.length;
-    const benefits = e.benefits.length;
-    const criteria = [
-      { label: `At least ${MIN_ENTRIES} costs logged`, met: costs >= MIN_ENTRIES, detail: `${costs} of ${MIN_ENTRIES}` },
-      { label: `At least ${MIN_ENTRIES} benefits logged`, met: benefits >= MIN_ENTRIES, detail: `${benefits} of ${MIN_ENTRIES}` },
-      { label: "Both columns equal count", met: costs === benefits && costs >= MIN_ENTRIES, detail: costs === benefits ? `${costs} each` : `${costs} costs, ${benefits} benefits` },
-    ];
-    const ready = criteria.every((c) => c.met);
-    const nextPhase = PHASES[PHASES.findIndex((p) => p.key === phase.key) + 1];
-    return {
-      ready,
-      criteria,
-      headline: ready ? "Ready to advance" : "Not ready yet",
-      message: ready
-        ? "Your ledger is leveled. Move on when the entries feel honest, not just complete."
-        : !criteria[0].met
-          ? `Add ${MIN_ENTRIES - costs} more cost ${MIN_ENTRIES - costs === 1 ? "entry" : "entries"} to continue.`
-          : !criteria[1].met
-            ? `Add ${MIN_ENTRIES - benefits} more benefit ${MIN_ENTRIES - benefits === 1 ? "entry" : "entries"} to continue.`
-            : "Balance the columns: add matching entries until costs and benefits are equal.",
-      nextLabel: ready ? `Continue to ${nextPhase?.title || "next round"} →` : "Skip ahead anyway",
-      tip: ready ? "You can stay and add more if the charge still feels active." : null,
-    };
-  }
-
-  const count = e[phase.key].length;
-  const criteria = [
-    { label: `At least ${MIN_ENTRIES} specific moments`, met: count >= MIN_ENTRIES, detail: `${count} of ${MIN_ENTRIES}` },
-    { label: "Each moment names where, when, and to whom", met: null, detail: "Check your entries" },
-  ];
-  const ready = count >= MIN_ENTRIES;
-  const nextPhase = PHASES[PHASES.findIndex((p) => p.key === phase.key) + 1];
-  const remaining = Math.max(0, MIN_ENTRIES - count);
-
-  return {
-    ready,
-    criteria,
-    headline: ready ? "Ready to advance" : "Not ready yet",
-    message: ready
-      ? "Minimum reps met. Proceed when revisiting these moments softens the charge, not just when the list looks full."
-      : `Add ${remaining} more specific ${remaining === 1 ? "moment" : "moments"} before this round is complete.`,
-    nextLabel: ready ? `Continue to ${nextPhase?.title || "next round"} →` : "Skip ahead anyway",
-    tip: ready ? "More reps are fine if you are still activated. Ask the coach if unsure." : "Each entry needs a real place, date, and person.",
-  };
 }
 
 function ProceedPanel({ phase, session }) {
@@ -1059,35 +936,6 @@ function ProceedPanel({ phase, session }) {
   );
 }
 
-function getCompletionProceedStatus(session) {
-  const phaseChecks = PHASES.map((p) => ({
-    label: p.title,
-    met: phaseComplete(p, session),
-    detail: phaseComplete(p, session) ? "Complete" : "Go back and finish",
-  }));
-  const hasReflection = !!session.reflection.trim();
-  const allPhases = phaseChecks.every((c) => c.met);
-  const criteria = [
-    ...phaseChecks,
-    { label: "Write your charge test reflection", met: hasReflection, detail: hasReflection ? "Written" : "Required below" },
-    { label: "Revisit memory: gratitude, not activation", met: null, detail: "Self check" },
-  ];
-  const ready = allPhases && hasReflection;
-  return {
-    ready,
-    criteria,
-    headline: session.done ? "Session complete" : ready ? "Ready to close out" : "Finish remaining rounds first",
-    message: session.done
-      ? "You marked this charge cleared. Review anytime or start a new session."
-      : !allPhases
-        ? "Complete all four rounds before the charge test counts."
-        : !hasReflection
-          ? "Close your eyes, revisit the memory, then write what you feel now."
-          : "If the memory brings gratitude or neutrality, mark complete. If still activated, go back or ask the coach.",
-    canMarkComplete: ready,
-  };
-}
-
 // ---------------------------------------------------------------- completion
 function Completion({ session, update, onHome }) {
   const e = session.entries;
@@ -1101,8 +949,13 @@ function Completion({ session, update, onHome }) {
         The Charge Test
       </h2>
       <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, maxWidth: 560 }}>
-        Close your eyes. Return to the moment with {session.person}. Hold everything at once: costs and benefits, opposition and support, reality and fantasy. Then answer honestly.
+        Close your eyes. Return to the moment with {session.person}. Hold everything at once: costs and benefits, opposition and support, reality and fantasy, their values and yours. Then answer honestly.
       </p>
+      {session.chargeStart !== null && (
+        <p className="cl-ui" style={{ margin: "12px 0 0", fontSize: 13, color: T.gray }}>
+          You started at <strong style={{ color: T.heat }}>{session.chargeStart}/10</strong> activation. Rate again below to measure the shift.
+        </p>
+      )}
 
       <div
         style={{
@@ -1150,6 +1003,12 @@ function Completion({ session, update, onHome }) {
           placeholder="Write what is actually here now..."
           className="cl-ui"
           style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 16px", fontSize: 15, lineHeight: 1.55, background: T.charcoal, color: T.white, resize: "vertical" }}
+        />
+        <ChargeSlider
+          value={session.chargeEnd}
+          onChange={(v) => update({ chargeEnd: v })}
+          label="Activation now (0 to 10)"
+          hint="Compare to where you started. A real shift usually shows up here."
         />
         <p className="cl-ui" style={{ margin: "16px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
           {completionStatus.canMarkComplete
@@ -1204,12 +1063,13 @@ function Completion({ session, update, onHome }) {
           Your stats
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }} className="cl-stats-grid">
-          <style>{`@media (min-width: 500px){ .cl-stats-grid { grid-template-columns: repeat(4, 1fr) !important; } }`}</style>
+          <style>{`@media (min-width: 500px){ .cl-stats-grid { grid-template-columns: repeat(5, 1fr) !important; } }`}</style>
           {[
             { n: e.own.length, label: "Owned" },
             { n: e.costs.length + e.benefits.length, label: "Balanced" },
             { n: e.opposite.length, label: "Opposites" },
             { n: e.fantasy.length, label: "Fantasies" },
+            { n: e.values?.length || 0, label: "Values" },
           ].map((s) => (
             <div key={s.label} style={{ textAlign: "center", background: T.surface, borderRadius: 12, padding: "12px 8px" }}>
               <p className="cl-display" style={{ margin: 0, fontSize: 28, color: T.volt, fontWeight: 800 }}>{s.n}</p>
@@ -1218,19 +1078,38 @@ function Completion({ session, update, onHome }) {
           ))}
         </div>
       </div>
-      <button onClick={onHome} className="cl-ui cl-btn" style={{ marginTop: 22, background: "none", border: "none", color: T.volt, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-        ← All sessions
-      </button>
+      <div style={{ display: "flex", gap: 12, marginTop: 22, flexWrap: "wrap" }}>
+        <button onClick={() => downloadLedgerExport(session)} className="cl-ui cl-btn"
+          style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "11px 20px" })}>
+          Export ledger
+        </button>
+        <button onClick={onHome} className="cl-ui cl-btn" style={{ background: "none", border: "none", color: T.volt, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: "11px 0", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          ← All sessions
+        </button>
+      </div>
     </div>
   );
 }
 
+function getResumeStep(session) {
+  for (let i = 0; i < PHASES.length; i++) {
+    if (!phaseComplete(PHASES[i], session)) return i;
+  }
+  return PHASES.length;
+}
+
 // ---------------------------------------------------------------- new session
 function NewSession({ onCreate, onCancel, hasSessions }) {
+  const [wizardStep, setWizardStep] = useState(0);
   const [person, setPerson] = useState("");
   const [trait, setTrait] = useState("");
   const [polarity, setPolarity] = useState("despise");
-  const ready = person.trim() && trait.trim();
+  const [originMemory, setOriginMemory] = useState("");
+  const [chargeStart, setChargeStart] = useState(7);
+  const [why, setWhy] = useState("");
+  const [cost, setCost] = useState("");
+  const [ifCleared, setIfCleared] = useState("");
+
   const inputStyle = {
     display: "block",
     width: "100%",
@@ -1243,58 +1122,125 @@ function NewSession({ onCreate, onCancel, hasSessions }) {
     background: T.charcoal,
     color: T.white,
   };
+
+  const step0Ready = person.trim() && trait.trim();
+  const step1Ready = originMemory.trim().length > 20;
+  const step2Ready = why.trim() && cost.trim();
+
+  const finish = () => {
+    onCreate({
+      person: person.trim(),
+      trait: trait.trim(),
+      polarity,
+      originMemory: originMemory.trim(),
+      chargeStart,
+      preCommitment: { why: why.trim(), cost: cost.trim(), ifCleared: ifCleared.trim() },
+    });
+  };
+
   return (
     <div className="cl-fade">
       <div style={{ background: `linear-gradient(135deg, ${T.charcoal}, ${T.surface})`, borderRadius: 24, padding: "32px 28px", border: `1px solid ${T.line}`, marginBottom: 28, position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", right: -20, top: -20, width: 140, height: 140, borderRadius: "50%", background: T.voltDim, filter: "blur(40px)" }} />
         <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt }}>
-          Mental training
+          Step {wizardStep + 1} of 3
         </p>
-        <h2 className="cl-display" style={{ fontSize: 56, fontWeight: 800, margin: "8px 0 10px", color: T.white, lineHeight: 0.92, maxWidth: 480 }}>
-          Balance The Charge
+        <h2 className="cl-display" style={{ fontSize: 48, fontWeight: 800, margin: "8px 0 10px", color: T.white, lineHeight: 0.92 }}>
+          {wizardStep === 0 ? "Name The Charge" : wizardStep === 1 ? "Anchor The Scene" : "Commit To The Work"}
         </h2>
-        <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, maxWidth: 480, margin: 0 }}>
-          One person. One trait. Four rounds of honest reps. Someone you resent or someone on a pedestal. Both are running you.
+        <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, margin: 0, maxWidth: 480 }}>
+          {wizardStep === 0 && "One person. One trait. Five rounds. Someone you resent or someone on a pedestal."}
+          {wizardStep === 1 && "Lock in the exact moment this started running you. Where, when, what happened, who saw."}
+          {wizardStep === 2 && "Put a stake in the ground. This is why the work matters and what shifts if you clear it."}
         </p>
       </div>
 
       <div style={{ maxWidth: 560 }}>
-        <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 4 }}>
-          Who holds the charge?
-          <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Name or initials" style={inputStyle} />
-        </label>
-        <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 18 }}>
-          What trait or action?
-          <input value={trait} onChange={(e) => setTrait(e.target.value)} placeholder="Dismisses my work in front of others" style={inputStyle} />
-        </label>
-        <p className="cl-ui" style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, margin: "18px 0 10px" }}>
-          Your charge type
-        </p>
-        <div className="cl-ui" style={{ display: "flex", gap: 10 }}>
-          {[
-            { v: "despise", label: "I resent it", sub: "They are below", c: T.heat, cs: T.heatDim },
-            { v: "admire", label: "I admire it", sub: "They are above", c: T.cool, cs: T.coolDim },
-          ].map((o) => (
-            <button key={o.v} onClick={() => setPolarity(o.v)} className="cl-btn"
-              style={{
-                flex: 1, padding: "14px 16px", borderRadius: 16, cursor: "pointer", textAlign: "left",
-                border: `2px solid ${polarity === o.v ? o.c : T.line}`,
-                background: polarity === o.v ? o.cs : T.surface,
-              }}>
-              <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: polarity === o.v ? o.c : T.white }}>{o.label}</span>
-              <span style={{ display: "block", fontSize: 11, color: T.gray, marginTop: 2 }}>{o.sub}</span>
-            </button>
-          ))}
-        </div>
+        {wizardStep === 0 && (
+          <>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray }}>
+              Who holds the charge?
+              <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Name or initials" style={inputStyle} />
+            </label>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 18 }}>
+              What trait or action?
+              <input value={trait} onChange={(e) => setTrait(e.target.value)} placeholder="Or pick a common pattern below" style={inputStyle} />
+            </label>
+            <div className="cl-ui" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              {TRAIT_CHIPS.map((t) => (
+                <button key={t} type="button" onClick={() => setTrait(t)} className="cl-chip cl-btn"
+                  style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 99, padding: "6px 12px", fontSize: 12, color: T.gray, cursor: "pointer" }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <p className="cl-ui" style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, margin: "18px 0 10px" }}>Your charge type</p>
+            <div className="cl-ui" style={{ display: "flex", gap: 10 }}>
+              {[
+                { v: "despise", label: "I resent it", sub: "They are below", c: T.heat, cs: T.heatDim },
+                { v: "admire", label: "I admire it", sub: "They are above", c: T.cool, cs: T.coolDim },
+              ].map((o) => (
+                <button key={o.v} type="button" onClick={() => setPolarity(o.v)} className="cl-btn"
+                  style={{ flex: 1, padding: "14px 16px", borderRadius: 16, cursor: "pointer", textAlign: "left", border: `2px solid ${polarity === o.v ? o.c : T.line}`, background: polarity === o.v ? o.cs : T.surface }}>
+                  <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: polarity === o.v ? o.c : T.white }}>{o.label}</span>
+                  <span style={{ display: "block", fontSize: 11, color: T.gray, marginTop: 2 }}>{o.sub}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {wizardStep === 1 && (
+          <>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray }}>
+              The triggering scene
+              <textarea value={originMemory} onChange={(e) => setOriginMemory(e.target.value)} rows={5}
+                placeholder="June 2023, team meeting, they interrupted me in front of the client. Witness: my colleague. I felt..."
+                style={{ ...inputStyle, resize: "vertical", lineHeight: 1.55 }} />
+            </label>
+            <ChargeSlider value={chargeStart} onChange={setChargeStart} label="Activation right now (0 to 10)" hint="This is your baseline. You will rate again at the end to measure the shift." />
+          </>
+        )}
+
+        {wizardStep === 2 && (
+          <>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray }}>
+              Why does this charge matter right now?
+              <textarea value={why} onChange={(e) => setWhy(e.target.value)} rows={2} placeholder="I think about this before sleep, during meetings..." style={{ ...inputStyle, resize: "vertical" }} />
+            </label>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 16 }}>
+              What is it costing you?
+              <textarea value={cost} onChange={(e) => setCost(e.target.value)} rows={2} placeholder="Focus, sleep, presence with my kids, confidence..." style={{ ...inputStyle, resize: "vertical" }} />
+            </label>
+            <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 16 }}>
+              What would shift if this cleared? (optional)
+              <textarea value={ifCleared} onChange={(e) => setIfCleared(e.target.value)} rows={2} placeholder="I could be present, direct, unbothered..." style={{ ...inputStyle, resize: "vertical" }} />
+            </label>
+          </>
+        )}
+
         <div style={{ display: "flex", gap: 12, marginTop: 28, flexWrap: "wrap" }}>
-          <button disabled={!ready} onClick={() => onCreate(person.trim(), trait.trim(), polarity)} className="cl-ui cl-btn"
-            style={btnBase({ background: ready ? T.volt : T.surfaceRaised, color: ready ? T.black : T.grayDim, border: "none", padding: "14px 28px", cursor: ready ? "pointer" : "default" })}>
-            Start training
-          </button>
-          {hasSessions && (
-            <button onClick={onCancel} className="cl-ui cl-btn"
+          {wizardStep > 0 && (
+            <button type="button" onClick={() => setWizardStep((s) => s - 1)} className="cl-ui cl-btn"
               style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "14px 22px" })}>
               Back
+            </button>
+          )}
+          {wizardStep < 2 && (
+            <button type="button" disabled={wizardStep === 0 ? !step0Ready : !step1Ready} onClick={() => setWizardStep((s) => s + 1)} className="cl-ui cl-btn"
+              style={btnBase({ background: (wizardStep === 0 ? step0Ready : step1Ready) ? T.volt : T.surfaceRaised, color: (wizardStep === 0 ? step0Ready : step1Ready) ? T.black : T.grayDim, border: "none", padding: "14px 28px", cursor: (wizardStep === 0 ? step0Ready : step1Ready) ? "pointer" : "default" })}>
+              Continue
+            </button>
+          )}
+          {wizardStep === 2 && (
+            <button type="button" disabled={!step2Ready} onClick={finish} className="cl-ui cl-btn"
+              style={btnBase({ background: step2Ready ? T.volt : T.surfaceRaised, color: step2Ready ? T.black : T.grayDim, border: "none", padding: "14px 28px", cursor: step2Ready ? "pointer" : "default" })}>
+              Start training
+            </button>
+          )}
+          {hasSessions && wizardStep === 0 && (
+            <button type="button" onClick={onCancel} className="cl-ui cl-btn"
+              style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "14px 22px" })}>
+              Cancel
             </button>
           )}
         </div>
@@ -1308,7 +1254,8 @@ export default function ChargeLedger() {
   const [sessions, setSessions] = useState(null);
   const [view, setView] = useState("home");
   const [activeId, setActiveId] = useState(null);
-  const [step, setStep] = useState(0); // 0..3 phases, 4 completion
+  const [step, setStep] = useState(0);
+  const [groundingOpen, setGroundingOpen] = useState(false);
   const loadedRef = useRef(false);
 
   useEffect(() => {
@@ -1340,13 +1287,14 @@ export default function ChargeLedger() {
     setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, ...patch } : s)));
 
   const openSession = (id) => {
+    const s = sessions.find((x) => x.id === id);
     setActiveId(id);
-    setStep(0);
+    setStep(s ? getResumeStep(s) : 0);
     setView("session");
   };
 
-  const create = (person, trait, polarity) => {
-    const s = newSession(person, trait, polarity);
+  const create = (data) => {
+    const s = newSession(data);
     setSessions((prev) => [s, ...prev]);
     setActiveId(s.id);
     setStep(0);
@@ -1357,19 +1305,22 @@ export default function ChargeLedger() {
 
   const completedCount = sessions.filter((s) => s.done).length;
   const activeProgress = active ? sessionProgress(active) : 0;
+  const patterns = detectPatterns(sessions);
+  const resumeSession = getResumeSession(sessions);
 
   return (
     <div style={{ minHeight: "100vh", background: T.black, color: T.white, padding: "0 0 100px" }}>
       <style>{FONT_CSS}</style>
+      <GroundingModal open={groundingOpen} onClose={() => setGroundingOpen(false)} />
 
       <header className="cl-sticky-bar" style={{ borderBottom: `1px solid ${T.line}`, background: "rgba(10,10,10,0.85)" }}>
         <div style={{ maxWidth: 920, margin: "0 auto", padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-          <button onClick={() => setView(sessions.length ? "home" : "new")} className="cl-btn" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-            <span className="cl-display" style={{ fontSize: 28, fontWeight: 800, color: T.white, lineHeight: 1 }}>Charge Ledger</span>
+          <Link href="/" style={{ textDecoration: "none" }}>
+            <span className="cl-display" style={{ fontSize: 28, fontWeight: 800, color: T.white, lineHeight: 1, display: "block" }}>Charge Ledger</span>
             <span className="cl-ui" style={{ display: "block", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt, fontWeight: 700, marginTop: 2 }}>
               Train your perception
             </span>
-          </button>
+          </Link>
           {view === "session" && active && (
             <div style={{ minWidth: 140, flex: "1 1 140px", maxWidth: 220 }}>
               <ProgressBar value={activeProgress} label="Session" />
@@ -1397,13 +1348,41 @@ export default function ChargeLedger() {
                 </p>
               </div>
             </div>
-            <p className="cl-ui" style={{ fontSize: 14, color: T.gray, maxWidth: 520, lineHeight: 1.65, margin: "0 0 24px" }}>
+            <p className="cl-ui" style={{ fontSize: 14, color: T.gray, maxWidth: 520, lineHeight: 1.65, margin: "0 0 16px" }}>
               Pick up where you left off. A charge is cleared when revisiting the memory brings gratitude, not activation.
             </p>
+
+            {resumeSession && (
+              <div style={{ background: T.voltDim, border: `1px solid ${T.volt}55`, borderRadius: 16, padding: "16px 20px", marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <p className="cl-ui" style={{ margin: 0, fontSize: 13, fontWeight: 700, color: T.volt }}>Continue your training</p>
+                  <p className="cl-ui" style={{ margin: "4px 0 0", fontSize: 14, color: T.white }}>{resumeSession.person} · {sessionProgress(resumeSession)}% done</p>
+                </div>
+                <button onClick={() => openSession(resumeSession.id)} className="cl-ui cl-btn"
+                  style={btnBase({ background: T.volt, color: T.black, border: "none", padding: "10px 18px" })}>
+                  Resume
+                </button>
+              </div>
+            )}
+
+            {(patterns.avgDrop !== null || patterns.topTraits.length > 0) && (
+              <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 16, padding: 18, marginBottom: 20 }}>
+                <p className="cl-display" style={{ margin: "0 0 10px", fontSize: 16, color: T.gray, fontWeight: 800 }}>Your patterns</p>
+                <div className="cl-ui" style={{ display: "flex", flexWrap: "wrap", gap: 16, fontSize: 13, color: T.gray, lineHeight: 1.6 }}>
+                  {patterns.avgDrop !== null && <span>Avg activation drop: <strong style={{ color: T.volt }}>{patterns.avgDrop} pts</strong></span>}
+                  <span>Resentment: {patterns.resentCount} · Admiration: {patterns.admireCount}</span>
+                  {patterns.topTraits.length > 0 && (
+                    <span>Recurring themes: {patterns.topTraits.map((t) => t.word).join(", ")}</span>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {sessions.map((s) => {
                 const pct = sessionProgress(s);
                 const accent = s.done ? T.volt : s.polarity === "despise" ? T.heat : T.cool;
+                const drop = s.chargeStart !== null && s.chargeEnd !== null ? s.chargeStart - s.chargeEnd : null;
                 return (
                   <div key={s.id} className="cl-card cl-fade" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 18, padding: "18px 20px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", transition: "border-color .2s ease" }}>
                     <div style={{ flex: 1, minWidth: 200 }}>
@@ -1415,6 +1394,7 @@ export default function ChargeLedger() {
                       </div>
                       <p className="cl-ui" style={{ margin: 0, fontSize: 14, color: T.gray, lineHeight: 1.4 }}>
                         <span style={{ color: accent, fontWeight: 600 }}>{s.polarity === "despise" ? "Resent" : "Admire"}</span> · {s.trait}
+                        {drop !== null && drop > 0 && <span style={{ color: T.cool }}> · −{drop} activation</span>}
                       </p>
                       <div style={{ marginTop: 10, maxWidth: 280 }}>
                         <ProgressBar value={pct} accent={accent} />
@@ -1424,6 +1404,12 @@ export default function ChargeLedger() {
                       style={btnBase({ background: s.done ? "transparent" : T.volt, color: s.done ? T.white : T.black, border: s.done ? `1px solid ${T.line}` : "none", padding: "10px 20px" })}>
                       {s.done ? "Review" : "Continue"}
                     </button>
+                    {s.done && (
+                      <button onClick={() => downloadLedgerExport(s)} className="cl-ui cl-btn"
+                        style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "10px 16px", fontSize: 11 })}>
+                        Export
+                      </button>
+                    )}
                     <button onClick={() => remove(s.id)} aria-label="Delete session" className="cl-ui cl-btn"
                       style={{ background: "none", border: "none", color: T.grayDim, fontSize: 12, fontWeight: 600, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                       Delete
@@ -1437,21 +1423,35 @@ export default function ChargeLedger() {
 
         {view === "session" && active && (
           <div>
-            <div className="cl-ui" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 24, background: T.surface, borderRadius: 16, padding: "14px 18px", border: `1px solid ${T.line}` }}>
+            <div className="cl-ui" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 16, background: T.surface, borderRadius: 16, padding: "14px 18px", border: `1px solid ${T.line}` }}>
               <div>
                 <p style={{ margin: 0, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: T.gray, fontWeight: 700 }}>Active target</p>
                 <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700 }}>
                   {active.person} · <span style={{ color: active.polarity === "despise" ? T.heat : T.cool }}>{active.trait}</span>
+                  {active.chargeStart !== null && <span style={{ color: T.gray, fontWeight: 500, fontSize: 13 }}> · started {active.chargeStart}/10</span>}
                 </p>
               </div>
-              <button onClick={() => setView("home")} className="cl-ui cl-btn" style={{ background: "none", border: "none", color: T.volt, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-                All sessions
-              </button>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <button onClick={() => setGroundingOpen(true)} className="cl-ui cl-btn"
+                  style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.gray, padding: "8px 14px", fontSize: 10 })}>
+                  Too activated?
+                </button>
+                <button onClick={() => setView("home")} className="cl-ui cl-btn" style={{ background: "none", border: "none", color: T.volt, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  All sessions
+                </button>
+              </div>
             </div>
 
+            {active.originMemory && (
+              <div style={{ background: T.charcoal, border: `1px solid ${T.line}`, borderLeft: `3px solid ${T.volt}`, borderRadius: 12, padding: "12px 16px", marginBottom: 20 }}>
+                <p className="cl-ui" style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: T.gray }}>Origin scene</p>
+                <p className="cl-ui" style={{ margin: "6px 0 0", fontSize: 14, color: T.offWhite, lineHeight: 1.55 }}>{active.originMemory}</p>
+              </div>
+            )}
+
             <nav className="cl-ui" aria-label="Phases" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-              {[...PHASES.map((p, i) => ({ label: p.num, title: p.title, i })), { label: "05", title: "Test", i: 4 }].map((tab) => {
-                const isDone = tab.i < 4 ? phaseComplete(PHASES[tab.i], active) : active.done;
+              {[...PHASES.map((p, i) => ({ label: p.num, title: p.title, i })), { label: "06", title: "Test", i: 5 }].map((tab) => {
+                const isDone = tab.i < PHASES.length ? phaseComplete(PHASES[tab.i], active) : active.done;
                 const isCurrent = step === tab.i;
                 return (
                   <button key={tab.i} onClick={() => setStep(tab.i)} aria-current={isCurrent ? "step" : undefined} className="cl-btn"
@@ -1469,7 +1469,7 @@ export default function ChargeLedger() {
                 );
               })}
             </nav>
-            {step < 4 && (
+            {step < PHASES.length && (
               <p className="cl-ui" style={{ margin: "0 0 20px", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
                 {phaseComplete(PHASES[step], active)
                   ? "This round is complete. Use the panel below or the sticky button when you are ready to move on."
@@ -1477,7 +1477,7 @@ export default function ChargeLedger() {
               </p>
             )}
 
-            {step < 4 ? (
+            {step < PHASES.length ? (
               <div className="cl-fade" key={step}>
                 <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: T.volt }}>
                   Round {PHASES[step].num} · {PHASES[step].tagline}
