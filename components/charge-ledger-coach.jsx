@@ -10,36 +10,106 @@ import { useState, useEffect, useRef } from "react";
 // ----------------------------------------------------------------------
 
 const T = {
-  bg: "#E9EAE4",
-  surface: "#F7F7F3",
-  surfaceDeep: "#EFEFE9",
-  ink: "#1C2326",
-  inkSoft: "#4A5458",
-  inkFaint: "#8B9296",
-  line: "#D4D6CD",
-  umber: "#8A4F2D",
-  umberSoft: "#F0E4DA",
-  teal: "#34666B",
-  tealSoft: "#DEE9E8",
-  level: "#5C6E58",
-  levelSoft: "#E4EADF",
-  coachBg: "#22302F",
-  coachInk: "#E8ECE7",
-  coachFaint: "#9DABA4",
+  black: "#0A0A0A",
+  charcoal: "#141414",
+  surface: "#1C1C1C",
+  surfaceRaised: "#262626",
+  white: "#FFFFFF",
+  offWhite: "#F4F4F0",
+  gray: "#8A8A8A",
+  grayDim: "#5C5C5C",
+  line: "#333333",
+  volt: "#D4FF00",
+  voltDim: "rgba(212,255,0,0.15)",
+  heat: "#FF4D4D",
+  heatDim: "rgba(255,77,77,0.12)",
+  cool: "#00E5A0",
+  coolDim: "rgba(0,229,160,0.12)",
+  win: "#D4FF00",
 };
 
 const FONT_CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Archivo:wght@400;500;600;700&display=swap');
-.cl-display { font-family: 'Cormorant Garamond', Georgia, serif; }
-.cl-ui { font-family: 'Archivo', system-ui, sans-serif; }
-.cl-fade { animation: clFade .35s ease both; }
-@keyframes clFade { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
-@keyframes clPulse { 0%,100% { opacity: .45; } 50% { opacity: 1; } }
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+* { box-sizing: border-box; }
+.cl-display { font-family: 'Barlow Condensed', system-ui, sans-serif; letter-spacing: 0.02em; text-transform: uppercase; }
+.cl-ui { font-family: 'Inter', system-ui, sans-serif; }
+.cl-fade { animation: clFade .4s cubic-bezier(.22,1,.36,1) both; }
+.cl-pop { animation: clPop .45s cubic-bezier(.22,1,.36,1) both; }
+@keyframes clFade { from { opacity: 0; transform: translateY(10px);} to { opacity: 1; transform: none;} }
+@keyframes clPop { 0% { opacity:0; transform: scale(.92);} 60% { transform: scale(1.02);} 100% { opacity:1; transform: scale(1);} }
+@keyframes clPulse { 0%,100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes clShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .cl-thinking span { animation: clPulse 1.2s ease infinite; display:inline-block; }
 .cl-thinking span:nth-child(2){ animation-delay:.2s } .cl-thinking span:nth-child(3){ animation-delay:.4s }
-@media (prefers-reduced-motion: reduce) { .cl-fade { animation: none; } .cl-beam { transition: none !important; } .cl-thinking span { animation: none; } }
-textarea:focus, input:focus, button:focus-visible { outline: 2px solid #34666B; outline-offset: 2px; }
+.cl-sticky-bar { position: sticky; top: 0; z-index: 40; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.cl-btn { transition: transform .15s ease, background .15s ease, border-color .15s ease, opacity .15s ease; }
+.cl-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.cl-btn:active:not(:disabled) { transform: translateY(0); }
+.cl-chip:hover { border-color: ${T.volt} !important; color: ${T.white} !important; }
+.cl-card:hover { border-color: #444 !important; }
+@media (prefers-reduced-motion: reduce) {
+  .cl-fade, .cl-pop { animation: none; }
+  .cl-beam { transition: none !important; }
+  .cl-thinking span { animation: none; }
+  .cl-btn:hover:not(:disabled) { transform: none; }
+}
+textarea:focus, input:focus, button:focus-visible { outline: 2px solid ${T.volt}; outline-offset: 2px; }
 `;
+
+function btnBase(extra = {}) {
+  return {
+    fontFamily: "'Inter', system-ui, sans-serif",
+    fontWeight: 700,
+    fontSize: 13,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    borderRadius: 999,
+    cursor: "pointer",
+    transition: "transform .15s ease, background .15s ease",
+    ...extra,
+  };
+}
+
+function sessionProgress(session) {
+  const e = session.entries;
+  const phaseScores = [
+    Math.min(e.own.length / MIN_ENTRIES, 1),
+    Math.min(Math.min(e.costs.length, e.benefits.length) / MIN_ENTRIES, 1),
+    Math.min(e.opposite.length / MIN_ENTRIES, 1),
+    Math.min(e.fantasy.length / MIN_ENTRIES, 1),
+    session.reflection.trim() ? 0.5 : 0,
+    session.done ? 0.5 : 0,
+  ];
+  return Math.round((phaseScores.reduce((a, b) => a + b, 0) / phaseScores.length) * 100);
+}
+
+function ProgressBar({ value, label, accent = T.volt }) {
+  return (
+    <div className="cl-ui" style={{ width: "100%" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        {label ? (
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: T.gray }}>
+            {label}
+          </span>
+        ) : <span />}
+        <span style={{ fontSize: 13, fontWeight: 800, color: accent, fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.04em" }}>
+          {value}%
+        </span>
+      </div>
+      <div style={{ height: 6, background: T.line, borderRadius: 99, overflow: "hidden" }}>
+        <div
+          style={{
+            height: "100%",
+            width: `${value}%`,
+            background: `linear-gradient(90deg, ${accent}, ${T.white})`,
+            borderRadius: 99,
+            transition: "width .6s cubic-bezier(.22,1,.36,1)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 const STORAGE_KEY = "charge-ledger-sessions-v2";
 const MIN_ENTRIES = 3;
@@ -194,45 +264,49 @@ function newSession(person, trait, polarity) {
 const PHASES = [
   {
     key: "own",
-    num: "I",
-    title: "Own the trait",
+    num: "01",
+    title: "Own It",
+    tagline: "Face the mirror",
     question:
-      "Go to specific moments where you displayed the same or a similar behavior. Where was it, when was it, and to whom?",
+      "Name real moments you did the same thing. Where, when, and to whom?",
     coach:
-      "Vague admission changes nothing. Episodic precision is the work: a real place, a real date, a real person on the receiving end. Keep adding moments until the sentence I would never do that becomes impossible to say.",
-    placeholder: "Spring 2019, in the kitchen, to Stephanie, when I...",
-    scan: ["at work", "at home", "with your kids", "to a stranger", "online", "to yourself"],
+      "Vague does not count. One real place, one real date, one real person. Keep stacking reps until I would never do that stops being believable.",
+    placeholder: "March 2022, at dinner, to my partner, when I...",
+    scan: ["at work", "at home", "with family", "to a stranger", "online", "to yourself"],
   },
   {
     key: "balance",
-    num: "II",
-    title: "Balance the trait",
+    num: "02",
+    title: "Level It",
+    tagline: "Balance the ledger",
     question:
-      "List the real costs of this trait and the real benefits of this trait. The ledger must level before you move on.",
+      "List the real costs and real benefits. Both columns must match before you advance.",
     coach:
-      "You already see one column clearly. That is the bias. The work is the other column. If you saw mostly costs, hunt benefits: who did this trait make resilient, independent, honest, awake? If you saw mostly benefits, hunt costs. Equal counts, honestly earned.",
+      "You see one side clearly. That is the bias. Hunt the hidden column until the beam levels.",
     scan: ["resilience built", "dependence avoided", "truth surfaced", "boundaries forced", "drive created", "discernment sharpened"],
   },
   {
     key: "opposite",
-    num: "III",
-    title: "Find the synchronous opposite",
+    num: "03",
+    title: "Find The Other Side",
+    tagline: "Widen the lens",
     question:
-      "Return to the exact moment of the charge. At that same moment, who was expressing the opposite toward you? Real or remembered, one person or many, near or far.",
+      "At the exact moment of the charge, who was showing you the opposite? Near or far, real or remembered.",
     coach:
-      "If someone was criticizing you, who was praising you at that time? If someone was leaving, who was arriving? The claim of the method is that the opposite is always present and your attention simply was not on it. Test the claim. Write only what you can actually locate.",
-    placeholder: "While he was tearing the plan apart, a text that morning had said...",
+      "If someone criticized you, who was for you in that same window? Write only what you can actually locate.",
+    placeholder: "While they tore into me, that morning someone had texted...",
     scan: ["someone present", "someone far away", "a message or call", "a memory you held", "your own inner voice", "several people at once"],
   },
   {
     key: "fantasy",
-    num: "IV",
-    title: "Crack the fantasy",
+    num: "04",
+    title: "Break The Fantasy",
+    tagline: "Price the ideal",
     question:
-      "If this person had done the exact opposite of what they did, what would the drawbacks have been?",
+      "If they had done the exact opposite, what would that have cost you?",
     coach:
-      "The pain lives in the comparison between what happened and a one sided fantasy of what should have happened. Dissolve the fantasy by pricing it. If they had been endlessly agreeable, supportive, present: what would that have cost you, made of you, kept you from?",
-    placeholder: "If she had agreed with everything I said, I would never have...",
+      "Pain lives in a one sided fantasy of what should have happened. Price it honestly.",
+    placeholder: "If they had always agreed with me, I would never have...",
     scan: ["dependency", "arrested growth", "naivety", "lost drive", "softened standards", "a worse blind spot"],
   },
 ];
@@ -243,28 +317,28 @@ function Beam({ left, right, label }) {
   const angle = Math.max(-16, Math.min(16, diff * 5));
   const leveled = left === right && left >= MIN_ENTRIES;
   return (
-    <div className="cl-ui" style={{ textAlign: "center", padding: "8px 0 2px" }}>
-      <svg width="220" height="64" viewBox="0 0 220 64" aria-hidden="true" style={{ overflow: "visible" }}>
-        <line x1="110" y1="14" x2="110" y2="50" stroke={T.inkFaint} strokeWidth="2" />
-        <path d="M96 50 L124 50 L118 58 L102 58 Z" fill={T.inkFaint} opacity="0.5" />
+    <div className="cl-ui" style={{ textAlign: "center", padding: "16px 0 8px", background: T.surfaceRaised, borderRadius: 16, border: `1px solid ${T.line}`, marginBottom: 8 }}>
+      <svg width="260" height="72" viewBox="0 0 260 72" aria-hidden="true" style={{ overflow: "visible" }}>
+        <line x1="130" y1="16" x2="130" y2="54" stroke={T.grayDim} strokeWidth="2" />
+        <path d="M114 54 L146 54 L138 64 L122 64 Z" fill={T.grayDim} opacity="0.6" />
         <g
           className="cl-beam"
           style={{
             transform: `rotate(${angle}deg)`,
-            transformOrigin: "110px 16px",
+            transformOrigin: "130px 18px",
             transition: "transform .5s cubic-bezier(.34,1.3,.5,1)",
           }}
         >
-          <line x1="30" y1="16" x2="190" y2="16" stroke={leveled ? T.level : T.ink} strokeWidth="3" strokeLinecap="round" />
-          <circle cx="30" cy="16" r="9" fill={T.umber} />
-          <circle cx="190" cy="16" r="9" fill={T.teal} />
-          <text x="30" y="20" textAnchor="middle" fill="#fff" fontSize="10" fontWeight="700">{left}</text>
-          <text x="190" y="20" textAnchor="middle" fill="#fff" fontSize="10" fontWeight="700">{right}</text>
+          <line x1="36" y1="18" x2="224" y2="18" stroke={leveled ? T.volt : T.white} strokeWidth="4" strokeLinecap="round" />
+          <circle cx="36" cy="18" r="11" fill={T.heat} />
+          <circle cx="224" cy="18" r="11" fill={T.cool} />
+          <text x="36" y="22" textAnchor="middle" fill={T.black} fontSize="11" fontWeight="800">{left}</text>
+          <text x="224" y="22" textAnchor="middle" fill={T.black} fontSize="11" fontWeight="800">{right}</text>
         </g>
-        <circle cx="110" cy="16" r="4" fill={leveled ? T.level : T.ink} />
+        <circle cx="130" cy="18" r="5" fill={leveled ? T.volt : T.white} />
       </svg>
-      <div style={{ fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase", color: leveled ? T.level : T.inkSoft, fontWeight: 600 }}>
-        {leveled ? "Leveled" : label}
+      <div style={{ fontSize: 12, letterSpacing: ".12em", textTransform: "uppercase", color: leveled ? T.volt : T.gray, fontWeight: 700 }}>
+        {leveled ? "Leveled up" : label}
       </div>
     </div>
   );
@@ -294,23 +368,20 @@ function CoachPanel({ session, phaseKey, modes }) {
     }
   };
 
-  const btn = (label, mode, disabled) => (
+  const btn = (label, mode, disabled, primary) => (
     <button
       key={mode}
       onClick={() => run(mode)}
       disabled={disabled || state.status === "loading"}
-      className="cl-ui"
-      style={{
-        background: "transparent",
-        border: `1px solid ${T.coachFaint}`,
-        color: disabled ? T.coachFaint : T.coachInk,
-        borderRadius: 6,
-        padding: "8px 14px",
-        fontSize: 13,
-        fontWeight: 600,
+      className="cl-ui cl-btn"
+      style={btnBase({
+        background: primary ? T.volt : "transparent",
+        border: primary ? "none" : `1px solid ${T.line}`,
+        color: primary ? T.black : disabled ? T.grayDim : T.white,
+        padding: "10px 18px",
         cursor: disabled || state.status === "loading" ? "default" : "pointer",
-        opacity: disabled ? 0.5 : 1,
-      }}
+        opacity: disabled ? 0.45 : 1,
+      })}
     >
       {label}
     </button>
@@ -320,63 +391,72 @@ function CoachPanel({ session, phaseKey, modes }) {
     <aside
       aria-label="Coach"
       style={{
-        background: T.coachBg,
-        borderRadius: 10,
-        padding: "18px 20px",
-        marginTop: 26,
+        background: `linear-gradient(135deg, ${T.charcoal} 0%, ${T.surface} 100%)`,
+        borderRadius: 20,
+        padding: "22px 24px",
+        marginTop: 28,
+        border: `1px solid ${T.line}`,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <p className="cl-display" style={{ margin: 0, fontSize: 22, fontStyle: "italic", fontWeight: 600, color: T.coachInk }}>
-          The coach
-        </p>
-        <p className="cl-ui" style={{ margin: 0, fontSize: 11, letterSpacing: ".07em", textTransform: "uppercase", color: T.coachFaint }}>
-          Briefed on the method. Reads your ledger.
-        </p>
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${T.volt}, ${T.cool})` }} />
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <p className="cl-display" style={{ margin: 0, fontSize: 28, fontWeight: 800, color: T.white, lineHeight: 1 }}>
+            Your Coach
+          </p>
+          <p className="cl-ui" style={{ margin: "6px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
+            Reads your ledger. Pushes you when you stall.
+          </p>
+        </div>
+        <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt, background: T.voltDim, padding: "5px 10px", borderRadius: 99 }}>
+          Live
+        </span>
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-        {modes.map((m) => btn(m.label, m.mode, m.disabled))}
+      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+        {modes.map((m, i) => btn(m.label, m.mode, m.disabled, i === 0))}
       </div>
 
       {state.status === "loading" && (
-        <p className="cl-ui cl-thinking" style={{ color: T.coachFaint, fontSize: 13, marginTop: 14, marginBottom: 0 }}>
-          Reading your ledger<span>.</span><span>.</span><span>.</span>
+        <p className="cl-ui cl-thinking" style={{ color: T.gray, fontSize: 14, marginTop: 16, marginBottom: 0, fontWeight: 500 }}>
+          Studying your reps<span>.</span><span>.</span><span>.</span>
         </p>
       )}
 
       {state.status === "error" && (
-        <div className="cl-fade" style={{ marginTop: 14 }}>
-          <p className="cl-ui" style={{ color: "#D8A79A", fontSize: 13, margin: 0, lineHeight: 1.6 }}>{state.error}</p>
+        <div className="cl-fade" style={{ marginTop: 16 }}>
+          <p className="cl-ui" style={{ color: T.heat, fontSize: 14, margin: 0, lineHeight: 1.6 }}>{state.error}</p>
           <button
             onClick={() => run(state.mode)}
-            className="cl-ui"
-            style={{ marginTop: 10, background: "transparent", border: `1px solid ${T.coachFaint}`, color: T.coachInk, borderRadius: 6, padding: "7px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+            className="cl-ui cl-btn"
+            style={btnBase({ marginTop: 12, background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "9px 16px" })}
           >
-            Retry
+            Try again
           </button>
         </div>
       )}
 
       {state.status === "done" && state.data && (
-        <div className="cl-fade" style={{ marginTop: 14 }}>
+        <div className="cl-fade" style={{ marginTop: 16 }}>
           {state.data.message ? (
-            <p className="cl-ui" style={{ color: T.coachInk, fontSize: 14, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
+            <p className="cl-ui" style={{ color: T.offWhite, fontSize: 15, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
               {state.data.message}
             </p>
           ) : null}
           {Array.isArray(state.data.questions) && state.data.questions.length > 0 && (
-            <ol style={{ margin: "12px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+            <ol style={{ margin: "14px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
               {state.data.questions.map((q, i) => (
-                <li key={i} className="cl-ui" style={{ display: "flex", gap: 10, color: T.coachInk, fontSize: 14, lineHeight: 1.55 }}>
-                  <span style={{ color: T.coachFaint, fontWeight: 700, minWidth: 14 }}>{i + 1}</span>
+                <li key={i} className="cl-ui" style={{ display: "flex", gap: 12, color: T.white, fontSize: 14, lineHeight: 1.55, background: T.surfaceRaised, borderRadius: 12, padding: "12px 14px", border: `1px solid ${T.line}` }}>
+                  <span style={{ color: T.volt, fontWeight: 800, minWidth: 18, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16 }}>{String(i + 1).padStart(2, "0")}</span>
                   <span>{q}</span>
                 </li>
               ))}
             </ol>
           )}
-          <p className="cl-ui" style={{ color: T.coachFaint, fontSize: 12, marginTop: 12, marginBottom: 0 }}>
-            Answer in the ledger above, then run the coach again if you want another pass.
+          <p className="cl-ui" style={{ color: T.gray, fontSize: 12, marginTop: 14, marginBottom: 0 }}>
+            Answer above, then hit the coach again for another round.
           </p>
         </div>
       )}
@@ -388,31 +468,31 @@ function CoachPanel({ session, phaseKey, modes }) {
 function EntryList({ entries, onRemove, color }) {
   if (!entries.length) return null;
   return (
-    <ol style={{ listStyle: "none", margin: "12px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+    <ol style={{ listStyle: "none", margin: "14px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
       {entries.map((e, i) => (
         <li
           key={i}
-          className="cl-fade"
+          className="cl-pop"
           style={{
-            background: T.surface,
+            background: T.surfaceRaised,
             border: `1px solid ${T.line}`,
-            borderLeft: `3px solid ${color}`,
-            borderRadius: 6,
-            padding: "10px 12px",
+            borderLeft: `4px solid ${color}`,
+            borderRadius: 14,
+            padding: "14px 16px",
             display: "flex",
-            gap: 10,
+            gap: 12,
             alignItems: "flex-start",
           }}
         >
-          <span className="cl-ui" style={{ fontSize: 11, fontWeight: 700, color: T.inkFaint, marginTop: 2, minWidth: 16 }}>
-            {i + 1}
+          <span className="cl-display" style={{ fontSize: 18, fontWeight: 800, color, marginTop: 1, minWidth: 24 }}>
+            {String(i + 1).padStart(2, "0")}
           </span>
-          <span className="cl-ui" style={{ fontSize: 14, lineHeight: 1.5, color: T.ink, flex: 1, whiteSpace: "pre-wrap" }}>{e}</span>
+          <span className="cl-ui" style={{ fontSize: 15, lineHeight: 1.55, color: T.offWhite, flex: 1, whiteSpace: "pre-wrap" }}>{e}</span>
           <button
             onClick={() => onRemove(i)}
             aria-label={`Remove entry ${i + 1}`}
-            className="cl-ui"
-            style={{ background: "none", border: "none", color: T.inkFaint, cursor: "pointer", fontSize: 14, padding: 2 }}
+            className="cl-ui cl-btn"
+            style={{ background: "none", border: "none", color: T.gray, cursor: "pointer", fontSize: 18, padding: 2, lineHeight: 1 }}
           >
             ×
           </button>
@@ -422,8 +502,9 @@ function EntryList({ entries, onRemove, color }) {
   );
 }
 
-function EntryInput({ placeholder, onAdd, color, seed, onSeedUsed }) {
+function EntryInput({ placeholder, onAdd, color, seed, onSeedUsed, onAdded }) {
   const [val, setVal] = useState("");
+  const [flash, setFlash] = useState(false);
   useEffect(() => {
     if (seed) {
       setVal(seed);
@@ -436,69 +517,79 @@ function EntryInput({ placeholder, onAdd, color, seed, onSeedUsed }) {
     if (!v) return;
     onAdd(v);
     setVal("");
+    setFlash(true);
+    onAdded && onAdded();
+    setTimeout(() => setFlash(false), 1200);
   };
   return (
-    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-      <textarea
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-        placeholder={placeholder}
-        rows={2}
-        className="cl-ui"
-        style={{
-          flex: 1,
-          resize: "vertical",
-          border: `1px solid ${T.line}`,
-          borderRadius: 6,
-          padding: "10px 12px",
-          fontSize: 14,
-          lineHeight: 1.5,
-          background: "#fff",
-          color: T.ink,
-        }}
-      />
-      <button
-        onClick={submit}
-        className="cl-ui"
-        style={{
-          alignSelf: "flex-end",
-          background: color,
-          color: "#fff",
-          border: "none",
-          borderRadius: 6,
-          padding: "10px 16px",
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        Add
-      </button>
+    <div>
+      <div style={{ display: "flex", gap: 10, marginTop: 14, flexDirection: "column" }}>
+        <textarea
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          placeholder={placeholder}
+          rows={3}
+          className="cl-ui"
+          style={{
+            width: "100%",
+            resize: "vertical",
+            border: `1px solid ${T.line}`,
+            borderRadius: 14,
+            padding: "14px 16px",
+            fontSize: 15,
+            lineHeight: 1.55,
+            background: T.charcoal,
+            color: T.white,
+          }}
+        />
+        <button
+          onClick={submit}
+          disabled={!val.trim()}
+          className="cl-ui cl-btn"
+          style={btnBase({
+            alignSelf: "flex-start",
+            background: val.trim() ? color : T.surfaceRaised,
+            color: val.trim() ? T.black : T.grayDim,
+            border: "none",
+            padding: "12px 24px",
+            cursor: val.trim() ? "pointer" : "default",
+          })}
+        >
+          + Add rep
+        </button>
+      </div>
+      {flash && (
+        <p className="cl-pop cl-ui" style={{ margin: "10px 0 0", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.volt }}>
+          Rep logged. Keep going.
+        </p>
+      )}
     </div>
   );
 }
 
 function ScanChips({ items, onPick }) {
   return (
-    <div className="cl-ui" style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10, alignItems: "center" }}>
-      <span style={{ fontSize: 11, letterSpacing: ".06em", textTransform: "uppercase", color: T.inkFaint, fontWeight: 700 }}>Scan</span>
+    <div className="cl-ui" style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14, alignItems: "center" }}>
+      <span style={{ fontSize: 10, letterSpacing: ".12em", textTransform: "uppercase", color: T.gray, fontWeight: 700 }}>Quick scan</span>
       {items.map((s) => (
         <button
           key={s}
           onClick={() => onPick(s)}
+          className="cl-chip cl-btn"
           style={{
-            background: T.surfaceDeep,
+            background: T.surface,
             border: `1px solid ${T.line}`,
             borderRadius: 99,
-            padding: "4px 10px",
+            padding: "6px 14px",
             fontSize: 12,
-            color: T.inkSoft,
+            fontWeight: 500,
+            color: T.gray,
             cursor: "pointer",
           }}
         >
@@ -518,33 +609,39 @@ function PhaseBody({ phase, session, update }) {
   if (phase.key === "balance") {
     const costs = ent.costs;
     const benefits = ent.benefits;
-    const blindLabel = despise ? "Benefits is your hidden column" : "Costs is your hidden column";
+    const blindLabel = despise ? "Hunt the benefits column" : "Hunt the costs column";
+    const pct = Math.min(costs.length, benefits.length);
     return (
       <div>
         <Beam left={costs.length} right={benefits.length} label={blindLabel} />
+        <div style={{ display: "flex", justifyContent: "center", margin: "8px 0 4px" }}>
+          <span className="cl-ui" style={{ fontSize: 12, fontWeight: 600, color: pct >= MIN_ENTRIES && costs.length === benefits.length ? T.volt : T.gray }}>
+            {costs.length} costs · {benefits.length} benefits · need {MIN_ENTRIES} each, matched
+          </span>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 20, marginTop: 8 }} className="cl-balance-grid">
           <style>{`@media (min-width: 700px){ .cl-balance-grid { grid-template-columns: 1fr 1fr !important; } }`}</style>
-          <section>
-            <h3 className="cl-ui" style={{ fontSize: 13, fontWeight: 700, color: T.umber, letterSpacing: ".05em", textTransform: "uppercase", margin: "0 0 4px" }}>
-              Costs of this trait
+          <section style={{ background: T.surface, borderRadius: 16, padding: 18, border: `1px solid ${T.line}` }}>
+            <h3 className="cl-display" style={{ fontSize: 20, fontWeight: 800, color: T.heat, margin: "0 0 6px" }}>
+              Costs
             </h3>
-            <p className="cl-ui" style={{ fontSize: 13, color: T.inkSoft, margin: 0 }}>
-              {despise ? "This side comes easily. List them, then earn the other side." : "This is the side your admiration hides. Look harder here."}
+            <p className="cl-ui" style={{ fontSize: 13, color: T.gray, margin: 0, lineHeight: 1.5 }}>
+              {despise ? "Comes easy. Log it, then earn the other side." : "Hidden by admiration. Dig here."}
             </p>
-            <EntryInput placeholder="It cost..." color={T.umber} seed={seed.a} onSeedUsed={() => setSeed((s) => ({ ...s, a: "" }))}
+            <EntryInput placeholder="It cost me..." color={T.heat} seed={seed.a} onSeedUsed={() => setSeed((s) => ({ ...s, a: "" }))}
               onAdd={(v) => update({ entries: { ...ent, costs: [...costs, v] } })} />
-            <EntryList entries={costs} color={T.umber} onRemove={(i) => update({ entries: { ...ent, costs: costs.filter((_, j) => j !== i) } })} />
+            <EntryList entries={costs} color={T.heat} onRemove={(i) => update({ entries: { ...ent, costs: costs.filter((_, j) => j !== i) } })} />
           </section>
-          <section>
-            <h3 className="cl-ui" style={{ fontSize: 13, fontWeight: 700, color: T.teal, letterSpacing: ".05em", textTransform: "uppercase", margin: "0 0 4px" }}>
-              Benefits of this trait
+          <section style={{ background: T.surface, borderRadius: 16, padding: 18, border: `1px solid ${T.line}` }}>
+            <h3 className="cl-display" style={{ fontSize: 20, fontWeight: 800, color: T.cool, margin: "0 0 6px" }}>
+              Benefits
             </h3>
-            <p className="cl-ui" style={{ fontSize: 13, color: T.inkSoft, margin: 0 }}>
-              {despise ? "This is the side your resentment hides. Who did this trait strengthen, wake up, or set free?" : "This side comes easily. List them, then earn the other side."}
+            <p className="cl-ui" style={{ fontSize: 13, color: T.gray, margin: 0, lineHeight: 1.5 }}>
+              {despise ? "Hidden by resentment. Who did this strengthen?" : "Comes easy. Log it, then earn the other side."}
             </p>
-            <EntryInput placeholder="It served by..." color={T.teal} seed={seed.b} onSeedUsed={() => setSeed((s) => ({ ...s, b: "" }))}
+            <EntryInput placeholder="It served by..." color={T.cool} seed={seed.b} onSeedUsed={() => setSeed((s) => ({ ...s, b: "" }))}
               onAdd={(v) => update({ entries: { ...ent, benefits: [...benefits, v] } })} />
-            <EntryList entries={benefits} color={T.teal} onRemove={(i) => update({ entries: { ...ent, benefits: benefits.filter((_, j) => j !== i) } })} />
+            <EntryList entries={benefits} color={T.cool} onRemove={(i) => update({ entries: { ...ent, benefits: benefits.filter((_, j) => j !== i) } })} />
             <ScanChips items={phase.scan} onPick={(s) => setSeed((x) => ({ ...x, b: s + ": " }))} />
           </section>
         </div>
@@ -554,16 +651,24 @@ function PhaseBody({ phase, session, update }) {
 
   const key = phase.key;
   const list = ent[key];
-  const color = key === "own" ? T.umber : key === "opposite" ? T.teal : T.ink;
+  const color = key === "own" ? T.heat : key === "opposite" ? T.cool : T.volt;
+  const remaining = Math.max(0, MIN_ENTRIES - list.length);
   return (
-    <div>
+    <div style={{ background: T.surface, borderRadius: 16, padding: 20, border: `1px solid ${T.line}` }}>
       <EntryInput placeholder={phase.placeholder} color={color} seed={seed.a} onSeedUsed={() => setSeed((s) => ({ ...s, a: "" }))}
         onAdd={(v) => update({ entries: { ...ent, [key]: [...list, v] } })} />
       <ScanChips items={phase.scan} onPick={(s) => setSeed((x) => ({ ...x, a: s + ": " }))} />
       <EntryList entries={list} color={color} onRemove={(i) => update({ entries: { ...ent, [key]: list.filter((_, j) => j !== i) } })} />
-      <p className="cl-ui" style={{ fontSize: 12, color: T.inkFaint, marginTop: 10 }}>
-        {list.length} of at least {MIN_ENTRIES} moments. More is better. Stop when the charge softens, not when the form is satisfied.
-      </p>
+      <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <ProgressBar value={Math.round((list.length / MIN_ENTRIES) * 100)} label="Phase reps" accent={color} />
+        </div>
+        {remaining > 0 && (
+          <span className="cl-ui" style={{ fontSize: 11, fontWeight: 700, color: T.gray, whiteSpace: "nowrap", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            {remaining} more
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -585,63 +690,82 @@ function Completion({ session, update, onHome }) {
   const e = session.entries;
   return (
     <div className="cl-fade">
-      <h2 className="cl-display" style={{ fontSize: 32, fontStyle: "italic", fontWeight: 600, margin: "0 0 6px", color: T.ink }}>
-        The charge test
-      </h2>
-      <p className="cl-ui" style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.6, maxWidth: 560 }}>
-        Close your eyes and return to the original moment with {session.person}. Hold both columns at once: what it cost and what it gave, who opposed you and who was for you, what happened and what the fantasy would have cost. Then answer honestly.
+      <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: T.volt }}>
+        Final round
       </p>
-      <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 8, padding: 18, margin: "18px 0" }}>
-        <p className="cl-ui" style={{ fontSize: 14, fontWeight: 600, color: T.ink, margin: "0 0 8px" }}>
+      <h2 className="cl-display" style={{ fontSize: 48, fontWeight: 800, margin: "6px 0 10px", color: T.white, lineHeight: 0.95 }}>
+        The Charge Test
+      </h2>
+      <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, maxWidth: 560 }}>
+        Close your eyes. Return to the moment with {session.person}. Hold everything at once: costs and benefits, opposition and support, reality and fantasy. Then answer honestly.
+      </p>
+      <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 20, padding: 22, margin: "22px 0" }}>
+        <p className="cl-ui" style={{ fontSize: 15, fontWeight: 700, color: T.white, margin: "0 0 10px" }}>
           When you revisit the memory now, what do you feel?
         </p>
         <textarea
           value={session.reflection}
           onChange={(ev) => update({ reflection: ev.target.value })}
-          rows={3}
+          rows={4}
           placeholder="Write what is actually here now..."
           className="cl-ui"
-          style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 12px", fontSize: 14, lineHeight: 1.5, background: "#fff", color: T.ink, resize: "vertical" }}
+          style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 16px", fontSize: 15, lineHeight: 1.55, background: T.charcoal, color: T.white, resize: "vertical" }}
         />
-        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
           <button
             onClick={() => update({ done: true })}
-            className="cl-ui"
-            style={{ background: T.level, color: "#fff", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            className="cl-ui cl-btn"
+            style={btnBase({ background: T.volt, color: T.black, border: "none", padding: "13px 22px" })}
           >
-            The charge is gone. Mark complete
+            Charge cleared
           </button>
           <button
             onClick={() => update({ done: false })}
-            className="cl-ui"
-            style={{ background: "transparent", color: T.ink, border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            className="cl-ui cl-btn"
+            style={btnBase({ background: "transparent", color: T.white, border: `1px solid ${T.line}`, padding: "13px 22px" })}
           >
-            Still activated. I will go deeper
+            Still activated
           </button>
         </div>
         {session.done && (
-          <p className="cl-ui cl-fade" style={{ fontSize: 13, color: T.level, fontWeight: 600, marginTop: 12, marginBottom: 0 }}>
-            Marked complete. Gratitude where there was a charge is the confirmation this work asks for.
-          </p>
+          <div className="cl-pop" style={{ marginTop: 16, background: T.voltDim, borderRadius: 12, padding: "14px 16px", border: `1px solid ${T.volt}44` }}>
+            <p className="cl-display" style={{ fontSize: 22, color: T.volt, fontWeight: 800, margin: 0 }}>
+              Session complete
+            </p>
+            <p className="cl-ui" style={{ fontSize: 13, color: T.offWhite, margin: "6px 0 0", lineHeight: 1.5 }}>
+              Gratitude where there was charge. That is the win.
+            </p>
+          </div>
         )}
       </div>
 
       <CoachPanel
         session={session}
         phaseKey="completion"
-        modes={[{ label: "Diagnose my remaining charge", mode: "charge", disabled: !session.reflection.trim() }]}
+        modes={[{ label: "Diagnose remaining charge", mode: "charge", disabled: !session.reflection.trim() }]}
       />
 
-      <div style={{ background: T.surfaceDeep, borderRadius: 8, padding: 16, marginTop: 18 }}>
-        <p className="cl-ui" style={{ fontSize: 12, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase", color: T.inkSoft, margin: "0 0 8px" }}>
-          Session ledger
+      <div style={{ background: T.surfaceRaised, borderRadius: 16, padding: 18, marginTop: 20, border: `1px solid ${T.line}` }}>
+        <p className="cl-display" style={{ fontSize: 16, fontWeight: 800, color: T.gray, margin: "0 0 10px" }}>
+          Your stats
         </p>
-        <p className="cl-ui" style={{ fontSize: 13, color: T.inkSoft, margin: 0, lineHeight: 1.7 }}>
-          {e.own.length} owned moments · {e.costs.length} costs and {e.benefits.length} benefits · {e.opposite.length} synchronous opposites · {e.fantasy.length} fantasy drawbacks
-        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }} className="cl-stats-grid">
+          <style>{`@media (min-width: 500px){ .cl-stats-grid { grid-template-columns: repeat(4, 1fr) !important; } }`}</style>
+          {[
+            { n: e.own.length, label: "Owned" },
+            { n: e.costs.length + e.benefits.length, label: "Balanced" },
+            { n: e.opposite.length, label: "Opposites" },
+            { n: e.fantasy.length, label: "Fantasies" },
+          ].map((s) => (
+            <div key={s.label} style={{ textAlign: "center", background: T.surface, borderRadius: 12, padding: "12px 8px" }}>
+              <p className="cl-display" style={{ margin: 0, fontSize: 28, color: T.volt, fontWeight: 800 }}>{s.n}</p>
+              <p className="cl-ui" style={{ margin: "2px 0 0", fontSize: 10, color: T.gray, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase" }}>{s.label}</p>
+            </div>
+          ))}
+        </div>
       </div>
-      <button onClick={onHome} className="cl-ui" style={{ marginTop: 18, background: "none", border: "none", color: T.teal, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}>
-        ← Back to all sessions
+      <button onClick={onHome} className="cl-ui cl-btn" style={{ marginTop: 22, background: "none", border: "none", color: T.volt, fontSize: 13, fontWeight: 700, cursor: "pointer", padding: 0, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        ← All sessions
       </button>
     </div>
   );
@@ -653,50 +777,73 @@ function NewSession({ onCreate, onCancel, hasSessions }) {
   const [trait, setTrait] = useState("");
   const [polarity, setPolarity] = useState("despise");
   const ready = person.trim() && trait.trim();
+  const inputStyle = {
+    display: "block",
+    width: "100%",
+    boxSizing: "border-box",
+    marginTop: 8,
+    border: `1px solid ${T.line}`,
+    borderRadius: 14,
+    padding: "14px 16px",
+    fontSize: 15,
+    background: T.charcoal,
+    color: T.white,
+  };
   return (
-    <div className="cl-fade" style={{ maxWidth: 560 }}>
-      <h2 className="cl-display" style={{ fontSize: 32, fontStyle: "italic", fontWeight: 600, margin: "0 0 6px", color: T.ink }}>
-        Open a ledger
-      </h2>
-      <p className="cl-ui" style={{ fontSize: 14, color: T.inkSoft, lineHeight: 1.6 }}>
-        One person, one trait at a time. Pick someone who occupies space in your mind without paying rent: someone you resent, or someone you have put on a pedestal. Both run you.
-      </p>
-      <label className="cl-ui" style={{ display: "block", fontSize: 13, fontWeight: 600, color: T.ink, marginTop: 16 }}>
-        Who is the person?
-        <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="A name or initials"
-          style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 6, border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 12px", fontSize: 14, background: "#fff", color: T.ink }} />
-      </label>
-      <label className="cl-ui" style={{ display: "block", fontSize: 13, fontWeight: 600, color: T.ink, marginTop: 14 }}>
-        What is the specific trait, action, or inaction?
-        <input value={trait} onChange={(e) => setTrait(e.target.value)} placeholder="Dismisses my work in front of others"
-          style={{ display: "block", width: "100%", boxSizing: "border-box", marginTop: 6, border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 12px", fontSize: 14, background: "#fff", color: T.ink }} />
-      </label>
-      <div className="cl-ui" style={{ display: "flex", gap: 8, marginTop: 14 }}>
-        {[
-          { v: "despise", label: "I despise it", c: T.umber, cs: T.umberSoft },
-          { v: "admire", label: "I admire it", c: T.teal, cs: T.tealSoft },
-        ].map((o) => (
-          <button key={o.v} onClick={() => setPolarity(o.v)}
-            style={{
-              flex: 1, padding: "10px 12px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer",
-              border: `1px solid ${polarity === o.v ? o.c : T.line}`,
-              background: polarity === o.v ? o.cs : T.surface,
-              color: polarity === o.v ? o.c : T.inkSoft,
-            }}>
-            {o.label}
-          </button>
-        ))}
+    <div className="cl-fade">
+      <div style={{ background: `linear-gradient(135deg, ${T.charcoal}, ${T.surface})`, borderRadius: 24, padding: "32px 28px", border: `1px solid ${T.line}`, marginBottom: 28, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", right: -20, top: -20, width: 140, height: 140, borderRadius: "50%", background: T.voltDim, filter: "blur(40px)" }} />
+        <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt }}>
+          Mental training
+        </p>
+        <h2 className="cl-display" style={{ fontSize: 56, fontWeight: 800, margin: "8px 0 10px", color: T.white, lineHeight: 0.92, maxWidth: 480 }}>
+          Balance The Charge
+        </h2>
+        <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, maxWidth: 480, margin: 0 }}>
+          One person. One trait. Four rounds of honest reps. Someone you resent or someone on a pedestal. Both are running you.
+        </p>
       </div>
-      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-        <button disabled={!ready} onClick={() => onCreate(person.trim(), trait.trim(), polarity)} className="cl-ui"
-          style={{ background: ready ? T.ink : T.inkFaint, color: "#fff", border: "none", borderRadius: 6, padding: "11px 18px", fontSize: 13, fontWeight: 600, cursor: ready ? "pointer" : "default" }}>
-          Begin the work
-        </button>
-        {hasSessions && (
-          <button onClick={onCancel} className="cl-ui" style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 6, padding: "11px 18px", fontSize: 13, fontWeight: 600, color: T.ink, cursor: "pointer" }}>
-            Cancel
+
+      <div style={{ maxWidth: 560 }}>
+        <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 4 }}>
+          Who holds the charge?
+          <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Name or initials" style={inputStyle} />
+        </label>
+        <label className="cl-ui" style={{ display: "block", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, marginTop: 18 }}>
+          What trait or action?
+          <input value={trait} onChange={(e) => setTrait(e.target.value)} placeholder="Dismisses my work in front of others" style={inputStyle} />
+        </label>
+        <p className="cl-ui" style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: T.gray, margin: "18px 0 10px" }}>
+          Your charge type
+        </p>
+        <div className="cl-ui" style={{ display: "flex", gap: 10 }}>
+          {[
+            { v: "despise", label: "I resent it", sub: "They are below", c: T.heat, cs: T.heatDim },
+            { v: "admire", label: "I admire it", sub: "They are above", c: T.cool, cs: T.coolDim },
+          ].map((o) => (
+            <button key={o.v} onClick={() => setPolarity(o.v)} className="cl-btn"
+              style={{
+                flex: 1, padding: "14px 16px", borderRadius: 16, cursor: "pointer", textAlign: "left",
+                border: `2px solid ${polarity === o.v ? o.c : T.line}`,
+                background: polarity === o.v ? o.cs : T.surface,
+              }}>
+              <span style={{ display: "block", fontSize: 14, fontWeight: 700, color: polarity === o.v ? o.c : T.white }}>{o.label}</span>
+              <span style={{ display: "block", fontSize: 11, color: T.gray, marginTop: 2 }}>{o.sub}</span>
+            </button>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 12, marginTop: 28, flexWrap: "wrap" }}>
+          <button disabled={!ready} onClick={() => onCreate(person.trim(), trait.trim(), polarity)} className="cl-ui cl-btn"
+            style={btnBase({ background: ready ? T.volt : T.surfaceRaised, color: ready ? T.black : T.grayDim, border: "none", padding: "14px 28px", cursor: ready ? "pointer" : "default" })}>
+            Start training
           </button>
-        )}
+          {hasSessions && (
+            <button onClick={onCancel} className="cl-ui cl-btn"
+              style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "14px 22px" })}>
+              Back
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -724,9 +871,12 @@ export default function ChargeLedger() {
 
   if (!sessions) {
     return (
-      <div className="cl-ui" style={{ minHeight: "100vh", background: T.bg, display: "grid", placeItems: "center", color: T.inkSoft, fontSize: 14 }}>
+      <div className="cl-ui" style={{ minHeight: "100vh", background: T.black, display: "grid", placeItems: "center", color: T.gray, fontSize: 14, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>
         <style>{FONT_CSS}</style>
-        Opening your ledger...
+        <div style={{ textAlign: "center" }}>
+          <p className="cl-display" style={{ fontSize: 32, color: T.volt, margin: "0 0 8px", fontWeight: 800 }}>Charge Ledger</p>
+          Loading your reps...
+        </div>
       </div>
     );
   }
@@ -751,56 +901,77 @@ export default function ChargeLedger() {
 
   const remove = (id) => setSessions((prev) => prev.filter((s) => s.id !== id));
 
+  const completedCount = sessions.filter((s) => s.done).length;
+  const activeProgress = active ? sessionProgress(active) : 0;
+
   return (
-    <div style={{ minHeight: "100vh", background: T.bg, color: T.ink, padding: "0 0 80px" }}>
+    <div style={{ minHeight: "100vh", background: T.black, color: T.white, padding: "0 0 100px" }}>
       <style>{FONT_CSS}</style>
 
-      <header style={{ borderBottom: `1px solid ${T.line}`, background: T.surface }}>
-        <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 20px", display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-          <button onClick={() => setView(sessions.length ? "home" : "new")} style={{ background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
-            <span className="cl-display" style={{ fontSize: 26, fontWeight: 600, fontStyle: "italic", color: T.ink }}>The Charge Ledger</span>
+      <header className="cl-sticky-bar" style={{ borderBottom: `1px solid ${T.line}`, background: "rgba(10,10,10,0.85)" }}>
+        <div style={{ maxWidth: 920, margin: "0 auto", padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <button onClick={() => setView(sessions.length ? "home" : "new")} className="cl-btn" style={{ background: "none", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}>
+            <span className="cl-display" style={{ fontSize: 28, fontWeight: 800, color: T.white, lineHeight: 1 }}>Charge Ledger</span>
+            <span className="cl-ui" style={{ display: "block", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt, fontWeight: 700, marginTop: 2 }}>
+              Train your perception
+            </span>
           </button>
-          <span className="cl-ui" style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: T.inkFaint }}>
-            A balancing protocol after Demartini, with a live coach
-          </span>
+          {view === "session" && active && (
+            <div style={{ minWidth: 140, flex: "1 1 140px", maxWidth: 220 }}>
+              <ProgressBar value={activeProgress} label="Session" />
+            </div>
+          )}
+          {view === "home" && sessions.length > 0 && (
+            <button onClick={() => setView("new")} className="cl-ui cl-btn"
+              style={btnBase({ background: T.volt, color: T.black, border: "none", padding: "10px 20px" })}>
+              New session
+            </button>
+          )}
         </div>
       </header>
 
-      <main style={{ maxWidth: 860, margin: "0 auto", padding: "32px 20px 0" }}>
+      <main style={{ maxWidth: 920, margin: "0 auto", padding: "36px 20px 0" }}>
         {view === "new" && <NewSession onCreate={create} onCancel={() => setView("home")} hasSessions={sessions.length > 0} />}
 
         {view === "home" && (
           <div className="cl-fade">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-              <h2 className="cl-display" style={{ fontSize: 32, fontStyle: "italic", fontWeight: 600, margin: 0 }}>Your ledgers</h2>
-              <button onClick={() => setView("new")} className="cl-ui"
-                style={{ background: T.ink, color: "#fff", border: "none", borderRadius: 6, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-                Open a new ledger
-              </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 16, marginBottom: 8 }}>
+              <div>
+                <h2 className="cl-display" style={{ fontSize: 48, fontWeight: 800, margin: 0, lineHeight: 0.95 }}>Your Sessions</h2>
+                <p className="cl-ui" style={{ fontSize: 14, color: T.gray, margin: "10px 0 0", lineHeight: 1.5 }}>
+                  {completedCount} completed · {sessions.length} total · auto saved
+                </p>
+              </div>
             </div>
-            <p className="cl-ui" style={{ fontSize: 13, color: T.inkSoft, maxWidth: 560, lineHeight: 1.6 }}>
-              Sessions save automatically. The coach reads only the ledger in front of it. A charge is complete when revisiting the memory produces gratitude instead of activation.
+            <p className="cl-ui" style={{ fontSize: 14, color: T.gray, maxWidth: 520, lineHeight: 1.65, margin: "0 0 24px" }}>
+              Pick up where you left off. A charge is cleared when revisiting the memory brings gratitude, not activation.
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 18 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {sessions.map((s) => {
-                const total = Object.values(s.entries).reduce((a, b) => a + b.length, 0);
+                const pct = sessionProgress(s);
+                const accent = s.done ? T.volt : s.polarity === "despise" ? T.heat : T.cool;
                 return (
-                  <div key={s.id} style={{ background: T.surface, border: `1px solid ${T.line}`, borderLeft: `3px solid ${s.done ? T.level : s.polarity === "despise" ? T.umber : T.teal}`, borderRadius: 8, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <div key={s.id} className="cl-card cl-fade" style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 18, padding: "18px 20px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", transition: "border-color .2s ease" }}>
                     <div style={{ flex: 1, minWidth: 200 }}>
-                      <p className="cl-ui" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{s.person}</p>
-                      <p className="cl-ui" style={{ margin: "2px 0 0", fontSize: 13, color: T.inkSoft }}>
-                        {s.polarity === "despise" ? "Despised" : "Admired"}: {s.trait}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                        <p className="cl-ui" style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{s.person}</p>
+                        {s.done && (
+                          <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", background: T.voltDim, color: T.volt, padding: "3px 8px", borderRadius: 99 }}>Done</span>
+                        )}
+                      </div>
+                      <p className="cl-ui" style={{ margin: 0, fontSize: 14, color: T.gray, lineHeight: 1.4 }}>
+                        <span style={{ color: accent, fontWeight: 600 }}>{s.polarity === "despise" ? "Resent" : "Admire"}</span> · {s.trait}
                       </p>
-                      <p className="cl-ui" style={{ margin: "4px 0 0", fontSize: 11, color: T.inkFaint, letterSpacing: ".04em", textTransform: "uppercase" }}>
-                        {s.done ? "Complete" : `${total} entries · in progress`}
-                      </p>
+                      <div style={{ marginTop: 10, maxWidth: 280 }}>
+                        <ProgressBar value={pct} accent={accent} />
+                      </div>
                     </div>
-                    <button onClick={() => openSession(s.id)} className="cl-ui"
-                      style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, color: T.ink, cursor: "pointer" }}>
+                    <button onClick={() => openSession(s.id)} className="cl-ui cl-btn"
+                      style={btnBase({ background: s.done ? "transparent" : T.volt, color: s.done ? T.white : T.black, border: s.done ? `1px solid ${T.line}` : "none", padding: "10px 20px" })}>
                       {s.done ? "Review" : "Continue"}
                     </button>
-                    <button onClick={() => remove(s.id)} aria-label="Delete session" className="cl-ui"
-                      style={{ background: "none", border: "none", color: T.inkFaint, fontSize: 13, cursor: "pointer" }}>
+                    <button onClick={() => remove(s.id)} aria-label="Delete session" className="cl-ui cl-btn"
+                      style={{ background: "none", border: "none", color: T.grayDim, fontSize: 12, fontWeight: 600, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                       Delete
                     </button>
                   </div>
@@ -812,30 +983,31 @@ export default function ChargeLedger() {
 
         {view === "session" && active && (
           <div>
-            <div className="cl-ui" style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
+            <div className="cl-ui" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 24, background: T.surface, borderRadius: 16, padding: "14px 18px", border: `1px solid ${T.line}` }}>
               <div>
-                <p style={{ margin: 0, fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: T.inkFaint }}>Working on</p>
-                <p style={{ margin: "2px 0 0", fontSize: 15, fontWeight: 600 }}>
-                  {active.person} · <span style={{ color: active.polarity === "despise" ? T.umber : T.teal }}>{active.trait}</span>
+                <p style={{ margin: 0, fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase", color: T.gray, fontWeight: 700 }}>Active target</p>
+                <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700 }}>
+                  {active.person} · <span style={{ color: active.polarity === "despise" ? T.heat : T.cool }}>{active.trait}</span>
                 </p>
               </div>
-              <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: T.teal, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <button onClick={() => setView("home")} className="cl-ui cl-btn" style={{ background: "none", border: "none", color: T.volt, fontSize: 12, fontWeight: 700, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase" }}>
                 All sessions
               </button>
             </div>
 
-            <nav className="cl-ui" aria-label="Phases" style={{ display: "flex", gap: 6, marginBottom: 26, flexWrap: "wrap" }}>
-              {[...PHASES.map((p, i) => ({ label: p.num, i })), { label: "✓", i: 4 }].map((tab) => {
+            <nav className="cl-ui" aria-label="Phases" style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
+              {[...PHASES.map((p, i) => ({ label: p.num, title: p.title, i })), { label: "05", title: "Test", i: 4 }].map((tab) => {
                 const isDone = tab.i < 4 ? phaseComplete(PHASES[tab.i], active) : active.done;
                 const isCurrent = step === tab.i;
                 return (
-                  <button key={tab.i} onClick={() => setStep(tab.i)}
-                    aria-current={isCurrent ? "step" : undefined}
+                  <button key={tab.i} onClick={() => setStep(tab.i)} aria-current={isCurrent ? "step" : undefined} className="cl-btn"
+                    title={tab.title}
                     style={{
-                      width: 40, height: 32, borderRadius: 6, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                      border: `1px solid ${isCurrent ? T.ink : T.line}`,
-                      background: isDone ? T.levelSoft : isCurrent ? T.surface : "transparent",
-                      color: isDone ? T.level : isCurrent ? T.ink : T.inkFaint,
+                      minWidth: 52, height: 44, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer",
+                      fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.04em",
+                      border: `2px solid ${isCurrent ? T.volt : isDone ? T.volt + "66" : T.line}`,
+                      background: isCurrent ? T.voltDim : isDone ? "rgba(212,255,0,0.08)" : T.surface,
+                      color: isCurrent ? T.volt : isDone ? T.volt : T.grayDim,
                     }}>
                     {tab.label}
                   </button>
@@ -845,16 +1017,16 @@ export default function ChargeLedger() {
 
             {step < 4 ? (
               <div className="cl-fade" key={step}>
-                <p className="cl-ui" style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: T.inkFaint }}>
-                  Phase {PHASES[step].num} of IV
+                <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: T.volt }}>
+                  Round {PHASES[step].num} · {PHASES[step].tagline}
                 </p>
-                <h2 className="cl-display" style={{ fontSize: 34, fontStyle: "italic", fontWeight: 600, margin: "4px 0 10px", lineHeight: 1.1 }}>
+                <h2 className="cl-display" style={{ fontSize: 52, fontWeight: 800, margin: "6px 0 12px", lineHeight: 0.95 }}>
                   {PHASES[step].title}
                 </h2>
-                <p className="cl-ui" style={{ fontSize: 15, fontWeight: 500, color: T.ink, lineHeight: 1.6, maxWidth: 620, margin: 0 }}>
+                <p className="cl-ui" style={{ fontSize: 17, fontWeight: 500, color: T.offWhite, lineHeight: 1.55, maxWidth: 640, margin: 0 }}>
                   {PHASES[step].question}
                 </p>
-                <p className="cl-ui" style={{ fontSize: 13, color: T.inkSoft, lineHeight: 1.65, maxWidth: 620, margin: "10px 0 8px", borderLeft: `2px solid ${T.line}`, paddingLeft: 12 }}>
+                <p className="cl-ui" style={{ fontSize: 14, color: T.gray, lineHeight: 1.65, maxWidth: 640, margin: "14px 0 6px", padding: "12px 16px", background: T.surface, borderRadius: 12, borderLeft: `3px solid ${T.volt}` }}>
                   {PHASES[step].coach}
                 </p>
 
@@ -864,24 +1036,24 @@ export default function ChargeLedger() {
                   session={active}
                   phaseKey={PHASES[step].key}
                   modes={[
-                    { label: "I am stuck", mode: "stuck", disabled: false },
-                    { label: "Pressure test my entries", mode: "pressure", disabled: phaseEntryCount(PHASES[step], active) === 0 },
+                    { label: "I'm stuck", mode: "stuck", disabled: false },
+                    { label: "Pressure test", mode: "pressure", disabled: phaseEntryCount(PHASES[step], active) === 0 },
                   ]}
                 />
 
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 28, gap: 10 }}>
-                  <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="cl-ui"
-                    style={{ background: "none", border: `1px solid ${T.line}`, borderRadius: 6, padding: "10px 16px", fontSize: 13, fontWeight: 600, color: step === 0 ? T.inkFaint : T.ink, cursor: step === 0 ? "default" : "pointer" }}>
+                <div className="cl-sticky-bar" style={{ display: "flex", justifyContent: "space-between", marginTop: 32, gap: 12, padding: "16px 0", background: "rgba(10,10,10,0.9)", borderTop: `1px solid ${T.line}`, bottom: 0 }}>
+                  <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="cl-ui cl-btn"
+                    style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: step === 0 ? T.grayDim : T.white, padding: "12px 22px", cursor: step === 0 ? "default" : "pointer" })}>
                     Back
                   </button>
-                  <button onClick={() => setStep(step + 1)} className="cl-ui"
-                    style={{
-                      background: phaseComplete(PHASES[step], active) ? T.ink : "transparent",
-                      color: phaseComplete(PHASES[step], active) ? "#fff" : T.inkSoft,
-                      border: `1px solid ${phaseComplete(PHASES[step], active) ? T.ink : T.line}`,
-                      borderRadius: 6, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer",
-                    }}>
-                    {phaseComplete(PHASES[step], active) ? "Next phase" : "Skip ahead anyway"}
+                  <button onClick={() => setStep(step + 1)} className="cl-ui cl-btn"
+                    style={btnBase({
+                      background: phaseComplete(PHASES[step], active) ? T.volt : "transparent",
+                      color: phaseComplete(PHASES[step], active) ? T.black : T.gray,
+                      border: `1px solid ${phaseComplete(PHASES[step], active) ? T.volt : T.line}`,
+                      padding: "12px 28px",
+                    })}>
+                    {phaseComplete(PHASES[step], active) ? "Next round →" : "Skip ahead"}
                   </button>
                 </div>
               </div>
@@ -892,9 +1064,9 @@ export default function ChargeLedger() {
         )}
       </main>
 
-      <footer className="cl-ui" style={{ maxWidth: 860, margin: "48px auto 0", padding: "0 20px" }}>
-        <p style={{ fontSize: 11, color: T.inkFaint, lineHeight: 1.6, borderTop: `1px solid ${T.line}`, paddingTop: 14 }}>
-          A self reflection aid, not therapy. For trauma involving abuse or assault, work with a trauma informed professional rather than this tool. Based on the publicly described structure of the Demartini Method; the full proprietary method is taught at his Breakthrough Experience.
+      <footer className="cl-ui" style={{ maxWidth: 920, margin: "56px auto 0", padding: "0 20px" }}>
+        <p style={{ fontSize: 11, color: T.grayDim, lineHeight: 1.65, borderTop: `1px solid ${T.line}`, paddingTop: 18 }}>
+          A self reflection tool, not therapy. For trauma involving abuse or assault, work with a trauma informed professional. Inspired by the publicly described structure of the Demartini Method.
         </p>
       </footer>
     </div>
