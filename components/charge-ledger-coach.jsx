@@ -148,6 +148,95 @@ const MODE_INSTRUCTIONS = {
   charge: `They have finished all phases and written a reflection on revisiting the memory. Read the reflection and the full ledger. Diagnose: is the charge dissolved, or does activation remain? If it remains, identify which phase is the likely weak point (generic owning, an unbalanced or unbelieved ledger, a forced synchronous opposite, an uncracked fantasy) and say why, referencing their entries. Then give 2 or 3 questions to reopen that phase. If it reads genuinely complete, say so plainly and name what shifted.`,
 };
 
+const PHASE_LABELS = {
+  own: "01 Own It: specific moments where you displayed the same trait",
+  balance: "02 Level It: real costs and benefits of the trait, columns must match",
+  opposite: "03 Find The Other Side: synchronous opposite present at the moment of charge",
+  fantasy: "04 Break The Fantasy: drawbacks if they had done the exact opposite",
+  completion: "05 The Charge Test: revisit the memory and assess remaining activation",
+};
+
+const CHAT_INSTRUCTIONS = `
+You are in an open conversation with someone working through the Charge Ledger balancing protocol. You are a master practitioner of this method with deep fluency in every principle below.
+
+CONVERSATION ROLE
+- Be warm, direct, and exacting. You are their expert guide, not a generic chatbot.
+- Answer questions about the method clearly when asked. Explain principles in plain language using their person and trait as the live example.
+- When they share confusion, resistance, or emotion, acknowledge it briefly, then guide with one sharp question or a clear next move.
+- Keep most replies to 2 to 5 sentences. Go longer only when they explicitly ask for a deeper explanation of a principle.
+- Never write their ledger entries for them. Help their own memory produce the answers.
+- Pressure test vague entries conversationally. Push for where, when, and to whom.
+- Reference their actual entries and words when relevant.
+- If they are stuck, offer 1 to 2 concrete places to scan (work, home, online, with family, etc.).
+- If content involves abuse, assault, or serious trauma, gently recommend a trauma informed professional and keep questions modest.
+- Never use dashes of any kind in your output. Use commas, periods, or colons instead.
+`;
+
+const CHAT_STARTERS = [
+  "I don't understand what this phase is asking",
+  "Help me find a specific moment",
+  "Is my entry honest enough?",
+  "Why isn't the charge shifting?",
+];
+
+function buildChatSystem(session, phaseKey) {
+  const ctx = {
+    person: session.person,
+    trait: session.trait,
+    polarity: session.polarity,
+    currentPhase: phaseKey,
+    phaseDescription: PHASE_LABELS[phaseKey] || phaseKey,
+    entries: session.entries,
+    reflection: session.reflection || null,
+    done: session.done,
+  };
+  return `${METHOD_BRIEF}
+
+${CHAT_INSTRUCTIONS}
+
+CURRENT SESSION (JSON)
+${JSON.stringify(ctx, null, 2)}`;
+}
+
+async function fetchCoachResponse(body) {
+  let response;
+  try {
+    response = await fetch("/api/coach", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Network request failed. Check your connection and try again.");
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error("The coach returned an unreadable response. Try again.");
+  }
+
+  if (data && data.error) {
+    throw new Error(data.error.message || "The API returned an error. Try again in a moment.");
+  }
+  if (!response.ok) {
+    throw new Error(`Request failed (${response.status}). Try again in a moment.`);
+  }
+
+  const text = (data.content || [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+
+  if (!text) {
+    throw new Error("The coach sent back an empty response. Try again.");
+  }
+
+  return text;
+}
+
 async function askCoach(mode, session, phaseKey) {
   const ctx = {
     person: session.person,
@@ -168,40 +257,7 @@ ${JSON.stringify(ctx, null, 2)}
 Respond ONLY with valid JSON, no markdown fences, no preamble, in this shape:
 {"message": "your short reframe or diagnosis", "questions": ["q1", "q2", "q3"]}`;
 
-  let response;
-  try {
-    response = await fetch("/api/coach", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-  } catch (e) {
-    throw new Error("Network request failed. Check your connection and try again.");
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (e) {
-    throw new Error("The coach returned an unreadable response. Try again.");
-  }
-
-  if (data && data.error) {
-    throw new Error(data.error.message || "The API returned an error. Try again in a moment.");
-  }
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}). Try again in a moment.`);
-  }
-
-  const text = (data.content || [])
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
-
-  if (!text.trim()) {
-    throw new Error("The coach sent back an empty response. Try again.");
-  }
-
+  const text = await fetchCoachResponse({ prompt });
   const clean = text.replace(/```json|```/g, "").trim();
 
   // First attempt: parse the whole thing
@@ -227,6 +283,14 @@ function normalizeCoach(obj) {
     message: typeof obj.message === "string" ? obj.message : "",
     questions: Array.isArray(obj.questions) ? obj.questions.filter((q) => typeof q === "string") : [],
   };
+}
+
+async function askCoachChat(session, phaseKey, messages) {
+  return fetchCoachResponse({
+    type: "chat",
+    system: buildChatSystem(session, phaseKey),
+    messages,
+  });
 }
 
 // ---------------------------------------------------------------- storage
@@ -258,6 +322,7 @@ function newSession(person, trait, polarity) {
     entries: { own: [], costs: [], benefits: [], opposite: [], fantasy: [] },
     reflection: "",
     done: false,
+    coachChat: [],
   };
 }
 
@@ -345,21 +410,30 @@ function Beam({ left, right, label }) {
 }
 
 // ---------------------------------------------------------------- coach panel
-function CoachPanel({ session, phaseKey, modes }) {
-  const [state, setState] = useState({ status: "idle", data: null, error: null, mode: null });
+function CoachPanel({ session, phaseKey, modes, onUpdate }) {
+  const [tab, setTab] = useState("chat");
+  const [quickState, setQuickState] = useState({ status: "idle", data: null, error: null, mode: null });
+  const [chatInput, setChatInput] = useState("");
+  const [chatStatus, setChatStatus] = useState("idle");
+  const [chatError, setChatError] = useState(null);
+  const chatEndRef = useRef(null);
+  const chatMessages = session.coachChat || [];
 
-  // Reset when phase changes
   useEffect(() => {
-    setState({ status: "idle", data: null, error: null, mode: null });
+    setQuickState({ status: "idle", data: null, error: null, mode: null });
   }, [phaseKey, session.id]);
 
-  const run = async (mode) => {
-    setState({ status: "loading", data: null, error: null, mode });
+  useEffect(() => {
+    if (tab === "chat") chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages.length, chatStatus, tab]);
+
+  const runQuick = async (mode) => {
+    setQuickState({ status: "loading", data: null, error: null, mode });
     try {
       const data = await askCoach(mode, session, phaseKey);
-      setState({ status: "done", data, error: null, mode });
+      setQuickState({ status: "done", data, error: null, mode });
     } catch (e) {
-      setState({
+      setQuickState({
         status: "error",
         data: null,
         error: e && e.message ? e.message : "The coach could not respond. Try again in a moment.",
@@ -368,19 +442,62 @@ function CoachPanel({ session, phaseKey, modes }) {
     }
   };
 
-  const btn = (label, mode, disabled, primary) => (
+  const sendChat = async (text) => {
+    const msg = text.trim();
+    if (!msg || chatStatus === "loading") return;
+
+    const userMsg = { role: "user", content: msg, at: new Date().toISOString() };
+    const withUser = [...chatMessages, userMsg];
+    onUpdate({ coachChat: withUser });
+    setChatInput("");
+    setChatStatus("loading");
+    setChatError(null);
+
+    try {
+      const reply = await askCoachChat(
+        { ...session, coachChat: withUser },
+        phaseKey,
+        withUser.map((m) => ({ role: m.role, content: m.content }))
+      );
+      const assistantMsg = { role: "assistant", content: reply, at: new Date().toISOString() };
+      onUpdate({ coachChat: [...withUser, assistantMsg] });
+      setChatStatus("idle");
+    } catch (e) {
+      setChatStatus("error");
+      setChatError(e && e.message ? e.message : "The coach could not respond. Try again.");
+    }
+  };
+
+  const quickBtn = (label, mode, disabled, primary) => (
     <button
       key={mode}
-      onClick={() => run(mode)}
-      disabled={disabled || state.status === "loading"}
+      onClick={() => runQuick(mode)}
+      disabled={disabled || quickState.status === "loading"}
       className="cl-ui cl-btn"
       style={btnBase({
         background: primary ? T.volt : "transparent",
         border: primary ? "none" : `1px solid ${T.line}`,
         color: primary ? T.black : disabled ? T.grayDim : T.white,
         padding: "10px 18px",
-        cursor: disabled || state.status === "loading" ? "default" : "pointer",
+        cursor: disabled || quickState.status === "loading" ? "default" : "pointer",
         opacity: disabled ? 0.45 : 1,
+      })}
+    >
+      {label}
+    </button>
+  );
+
+  const tabBtn = (id, label) => (
+    <button
+      key={id}
+      onClick={() => setTab(id)}
+      className="cl-ui cl-btn"
+      style={btnBase({
+        background: tab === id ? T.volt : "transparent",
+        color: tab === id ? T.black : T.gray,
+        border: tab === id ? "none" : `1px solid ${T.line}`,
+        padding: "8px 16px",
+        fontSize: 11,
       })}
     >
       {label}
@@ -407,7 +524,7 @@ function CoachPanel({ session, phaseKey, modes }) {
             Your Coach
           </p>
           <p className="cl-ui" style={{ margin: "6px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
-            Reads your ledger. Pushes you when you stall.
+            Master of the method. Chat anytime for clarity.
           </p>
         </div>
         <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", textTransform: "uppercase", color: T.volt, background: T.voltDim, padding: "5px 10px", borderRadius: 99 }}>
@@ -415,49 +532,185 @@ function CoachPanel({ session, phaseKey, modes }) {
         </span>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-        {modes.map((m, i) => btn(m.label, m.mode, m.disabled, i === 0))}
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        {tabBtn("chat", "Chat")}
+        {tabBtn("quick", "Quick help")}
       </div>
 
-      {state.status === "loading" && (
-        <p className="cl-ui cl-thinking" style={{ color: T.gray, fontSize: 14, marginTop: 16, marginBottom: 0, fontWeight: 500 }}>
-          Studying your reps<span>.</span><span>.</span><span>.</span>
-        </p>
-      )}
+      {tab === "quick" && (
+        <div className="cl-fade">
+          <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+            {modes.map((m, i) => quickBtn(m.label, m.mode, m.disabled, i === 0))}
+          </div>
 
-      {state.status === "error" && (
-        <div className="cl-fade" style={{ marginTop: 16 }}>
-          <p className="cl-ui" style={{ color: T.heat, fontSize: 14, margin: 0, lineHeight: 1.6 }}>{state.error}</p>
-          <button
-            onClick={() => run(state.mode)}
-            className="cl-ui cl-btn"
-            style={btnBase({ marginTop: 12, background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "9px 16px" })}
-          >
-            Try again
-          </button>
+          {quickState.status === "loading" && (
+            <p className="cl-ui cl-thinking" style={{ color: T.gray, fontSize: 14, marginTop: 16, marginBottom: 0, fontWeight: 500 }}>
+              Studying your reps<span>.</span><span>.</span><span>.</span>
+            </p>
+          )}
+
+          {quickState.status === "error" && (
+            <div className="cl-fade" style={{ marginTop: 16 }}>
+              <p className="cl-ui" style={{ color: T.heat, fontSize: 14, margin: 0, lineHeight: 1.6 }}>{quickState.error}</p>
+              <button
+                onClick={() => runQuick(quickState.mode)}
+                className="cl-ui cl-btn"
+                style={btnBase({ marginTop: 12, background: "transparent", border: `1px solid ${T.line}`, color: T.white, padding: "9px 16px" })}
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {quickState.status === "done" && quickState.data && (
+            <div className="cl-fade" style={{ marginTop: 16 }}>
+              {quickState.data.message ? (
+                <p className="cl-ui" style={{ color: T.offWhite, fontSize: 15, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
+                  {quickState.data.message}
+                </p>
+              ) : null}
+              {Array.isArray(quickState.data.questions) && quickState.data.questions.length > 0 && (
+                <ol style={{ margin: "14px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+                  {quickState.data.questions.map((q, i) => (
+                    <li key={i} className="cl-ui" style={{ display: "flex", gap: 12, color: T.white, fontSize: 14, lineHeight: 1.55, background: T.surfaceRaised, borderRadius: 12, padding: "12px 14px", border: `1px solid ${T.line}` }}>
+                      <span style={{ color: T.volt, fontWeight: 800, minWidth: 18, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16 }}>{String(i + 1).padStart(2, "0")}</span>
+                      <span>{q}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <p className="cl-ui" style={{ color: T.gray, fontSize: 12, marginTop: 14, marginBottom: 0 }}>
+                Answer in the ledger above, or switch to Chat for a deeper conversation.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
-      {state.status === "done" && state.data && (
+      {tab === "chat" && (
         <div className="cl-fade" style={{ marginTop: 16 }}>
-          {state.data.message ? (
-            <p className="cl-ui" style={{ color: T.offWhite, fontSize: 15, lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
-              {state.data.message}
-            </p>
-          ) : null}
-          {Array.isArray(state.data.questions) && state.data.questions.length > 0 && (
-            <ol style={{ margin: "14px 0 0", padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
-              {state.data.questions.map((q, i) => (
-                <li key={i} className="cl-ui" style={{ display: "flex", gap: 12, color: T.white, fontSize: 14, lineHeight: 1.55, background: T.surfaceRaised, borderRadius: 12, padding: "12px 14px", border: `1px solid ${T.line}` }}>
-                  <span style={{ color: T.volt, fontWeight: 800, minWidth: 18, fontFamily: "'Barlow Condensed', sans-serif", fontSize: 16 }}>{String(i + 1).padStart(2, "0")}</span>
-                  <span>{q}</span>
-                </li>
-              ))}
-            </ol>
+          <div
+            className="cl-ui"
+            style={{
+              maxHeight: 340,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              padding: "4px 2px",
+              marginBottom: 12,
+            }}
+          >
+            {chatMessages.length === 0 && (
+              <div style={{ textAlign: "center", padding: "20px 12px" }}>
+                <p style={{ margin: 0, fontSize: 14, color: T.gray, lineHeight: 1.55 }}>
+                  Ask anything about this phase, your entries, or the method. Your coach knows your full ledger.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginTop: 14 }}>
+                  {CHAT_STARTERS.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => sendChat(s)}
+                      disabled={chatStatus === "loading"}
+                      className="cl-chip cl-btn"
+                      style={{
+                        background: T.surfaceRaised,
+                        border: `1px solid ${T.line}`,
+                        borderRadius: 99,
+                        padding: "8px 14px",
+                        fontSize: 12,
+                        color: T.offWhite,
+                        cursor: chatStatus === "loading" ? "default" : "pointer",
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chatMessages.map((m, i) => (
+              <div
+                key={i}
+                className="cl-fade"
+                style={{
+                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                  maxWidth: "88%",
+                  background: m.role === "user" ? T.voltDim : T.surfaceRaised,
+                  border: `1px solid ${m.role === "user" ? T.volt + "44" : T.line}`,
+                  borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                  padding: "12px 14px",
+                }}
+              >
+                <p style={{ margin: 0, fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: m.role === "user" ? T.volt : T.cool, marginBottom: 4 }}>
+                  {m.role === "user" ? "You" : "Coach"}
+                </p>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: T.offWhite, whiteSpace: "pre-wrap" }}>{m.content}</p>
+              </div>
+            ))}
+            {chatStatus === "loading" && (
+              <p className="cl-ui cl-thinking" style={{ color: T.gray, fontSize: 13, margin: "4px 0 0", fontWeight: 500 }}>
+                Coach is thinking<span>.</span><span>.</span><span>.</span>
+              </p>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {chatError && (
+            <p className="cl-ui" style={{ color: T.heat, fontSize: 13, margin: "0 0 10px", lineHeight: 1.5 }}>{chatError}</p>
           )}
-          <p className="cl-ui" style={{ color: T.gray, fontSize: 12, marginTop: 14, marginBottom: 0 }}>
-            Answer above, then hit the coach again for another round.
-          </p>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+            <textarea
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendChat(chatInput);
+                }
+              }}
+              placeholder="Ask your coach anything..."
+              rows={2}
+              disabled={chatStatus === "loading"}
+              className="cl-ui"
+              style={{
+                flex: 1,
+                resize: "none",
+                border: `1px solid ${T.line}`,
+                borderRadius: 14,
+                padding: "12px 14px",
+                fontSize: 14,
+                lineHeight: 1.5,
+                background: T.charcoal,
+                color: T.white,
+              }}
+            />
+            <button
+              onClick={() => sendChat(chatInput)}
+              disabled={!chatInput.trim() || chatStatus === "loading"}
+              className="cl-ui cl-btn"
+              style={btnBase({
+                background: chatInput.trim() && chatStatus !== "loading" ? T.volt : T.surfaceRaised,
+                color: chatInput.trim() && chatStatus !== "loading" ? T.black : T.grayDim,
+                border: "none",
+                padding: "12px 20px",
+                cursor: chatInput.trim() && chatStatus !== "loading" ? "pointer" : "default",
+              })}
+            >
+              Send
+            </button>
+          </div>
+          {chatMessages.length > 0 && (
+            <button
+              onClick={() => onUpdate({ coachChat: [] })}
+              disabled={chatStatus === "loading"}
+              className="cl-ui cl-btn"
+              style={{ marginTop: 10, background: "none", border: "none", color: T.grayDim, fontSize: 11, fontWeight: 600, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase", padding: 0 }}
+            >
+              Clear chat
+            </button>
+          )}
         </div>
       )}
     </aside>
@@ -743,6 +996,7 @@ function Completion({ session, update, onHome }) {
         session={session}
         phaseKey="completion"
         modes={[{ label: "Diagnose remaining charge", mode: "charge", disabled: !session.reflection.trim() }]}
+        onUpdate={update}
       />
 
       <div style={{ background: T.surfaceRaised, borderRadius: 16, padding: 18, marginTop: 20, border: `1px solid ${T.line}` }}>
@@ -1039,6 +1293,7 @@ export default function ChargeLedger() {
                     { label: "I'm stuck", mode: "stuck", disabled: false },
                     { label: "Pressure test", mode: "pressure", disabled: phaseEntryCount(PHASES[step], active) === 0 },
                   ]}
+                  onUpdate={update}
                 />
 
                 <div className="cl-sticky-bar" style={{ display: "flex", justifyContent: "space-between", marginTop: 32, gap: 12, padding: "16px 0", background: "rgba(10,10,10,0.9)", borderTop: `1px solid ${T.line}`, bottom: 0 }}>
