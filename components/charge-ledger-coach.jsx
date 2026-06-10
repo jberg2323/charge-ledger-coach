@@ -927,9 +927,7 @@ function PhaseBody({ phase, session, update }) {
 }
 
 function phaseComplete(phase, session) {
-  const e = session.entries;
-  if (phase.key === "balance") return e.costs.length >= MIN_ENTRIES && e.costs.length === e.benefits.length;
-  return e[phase.key].length >= MIN_ENTRIES;
+  return getPhaseProceedStatus(phase, session).ready;
 }
 
 function phaseEntryCount(phase, session) {
@@ -938,9 +936,162 @@ function phaseEntryCount(phase, session) {
   return e[phase.key].length;
 }
 
+function getPhaseProceedStatus(phase, session) {
+  const e = session.entries;
+
+  if (phase.key === "balance") {
+    const costs = e.costs.length;
+    const benefits = e.benefits.length;
+    const criteria = [
+      { label: `At least ${MIN_ENTRIES} costs logged`, met: costs >= MIN_ENTRIES, detail: `${costs} of ${MIN_ENTRIES}` },
+      { label: `At least ${MIN_ENTRIES} benefits logged`, met: benefits >= MIN_ENTRIES, detail: `${benefits} of ${MIN_ENTRIES}` },
+      { label: "Both columns equal count", met: costs === benefits && costs >= MIN_ENTRIES, detail: costs === benefits ? `${costs} each` : `${costs} costs, ${benefits} benefits` },
+    ];
+    const ready = criteria.every((c) => c.met);
+    const nextPhase = PHASES[PHASES.findIndex((p) => p.key === phase.key) + 1];
+    return {
+      ready,
+      criteria,
+      headline: ready ? "Ready to advance" : "Not ready yet",
+      message: ready
+        ? "Your ledger is leveled. Move on when the entries feel honest, not just complete."
+        : !criteria[0].met
+          ? `Add ${MIN_ENTRIES - costs} more cost ${MIN_ENTRIES - costs === 1 ? "entry" : "entries"} to continue.`
+          : !criteria[1].met
+            ? `Add ${MIN_ENTRIES - benefits} more benefit ${MIN_ENTRIES - benefits === 1 ? "entry" : "entries"} to continue.`
+            : "Balance the columns: add matching entries until costs and benefits are equal.",
+      nextLabel: ready ? `Continue to ${nextPhase?.title || "next round"} →` : "Skip ahead anyway",
+      tip: ready ? "You can stay and add more if the charge still feels active." : null,
+    };
+  }
+
+  const count = e[phase.key].length;
+  const criteria = [
+    { label: `At least ${MIN_ENTRIES} specific moments`, met: count >= MIN_ENTRIES, detail: `${count} of ${MIN_ENTRIES}` },
+    { label: "Each moment names where, when, and to whom", met: null, detail: "Check your entries" },
+  ];
+  const ready = count >= MIN_ENTRIES;
+  const nextPhase = PHASES[PHASES.findIndex((p) => p.key === phase.key) + 1];
+  const remaining = Math.max(0, MIN_ENTRIES - count);
+
+  return {
+    ready,
+    criteria,
+    headline: ready ? "Ready to advance" : "Not ready yet",
+    message: ready
+      ? "Minimum reps met. Proceed when revisiting these moments softens the charge, not just when the list looks full."
+      : `Add ${remaining} more specific ${remaining === 1 ? "moment" : "moments"} before this round is complete.`,
+    nextLabel: ready ? `Continue to ${nextPhase?.title || "next round"} →` : "Skip ahead anyway",
+    tip: ready ? "More reps are fine if you are still activated. Ask the coach if unsure." : "Each entry needs a real place, date, and person.",
+  };
+}
+
+function ProceedPanel({ phase, session }) {
+  const status = getPhaseProceedStatus(phase, session);
+  return (
+    <div
+      className="cl-fade"
+      style={{
+        marginTop: 24,
+        borderRadius: 18,
+        padding: "18px 20px",
+        border: `2px solid ${status.ready ? T.volt : T.line}`,
+        background: status.ready ? T.voltDim : T.surface,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <p className="cl-display" style={{ margin: 0, fontSize: 18, fontWeight: 800, color: status.ready ? T.volt : T.white }}>
+          {status.headline}
+        </p>
+        <span
+          className="cl-ui"
+          style={{
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: status.ready ? T.black : T.gray,
+            background: status.ready ? T.volt : T.surfaceRaised,
+            padding: "5px 10px",
+            borderRadius: 99,
+          }}
+        >
+          {status.ready ? "Clear to proceed" : "Keep working"}
+        </span>
+      </div>
+
+      <p className="cl-ui" style={{ margin: "10px 0 14px", fontSize: 14, lineHeight: 1.6, color: status.ready ? T.offWhite : T.gray }}>
+        {status.message}
+      </p>
+
+      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+        {status.criteria.map((c) => (
+          <li key={c.label} className="cl-ui" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 99,
+                display: "grid",
+                placeItems: "center",
+                fontSize: 11,
+                fontWeight: 800,
+                flexShrink: 0,
+                background: c.met === true ? T.volt : c.met === false ? T.surfaceRaised : "transparent",
+                color: c.met === true ? T.black : T.gray,
+                border: `2px solid ${c.met === true ? T.volt : c.met === false ? T.heat : T.grayDim}`,
+              }}
+            >
+              {c.met === true ? "✓" : c.met === false ? "!" : "?"}
+            </span>
+            <span style={{ color: c.met === true ? T.white : T.gray, flex: 1 }}>{c.label}</span>
+            <span style={{ color: T.grayDim, fontSize: 12, fontWeight: 600 }}>{c.detail}</span>
+          </li>
+        ))}
+      </ul>
+
+      {status.tip && (
+        <p className="cl-ui" style={{ margin: "12px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5, fontStyle: "italic" }}>
+          {status.tip}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function getCompletionProceedStatus(session) {
+  const phaseChecks = PHASES.map((p) => ({
+    label: p.title,
+    met: phaseComplete(p, session),
+    detail: phaseComplete(p, session) ? "Complete" : "Go back and finish",
+  }));
+  const hasReflection = !!session.reflection.trim();
+  const allPhases = phaseChecks.every((c) => c.met);
+  const criteria = [
+    ...phaseChecks,
+    { label: "Write your charge test reflection", met: hasReflection, detail: hasReflection ? "Written" : "Required below" },
+    { label: "Revisit memory: gratitude, not activation", met: null, detail: "Self check" },
+  ];
+  const ready = allPhases && hasReflection;
+  return {
+    ready,
+    criteria,
+    headline: session.done ? "Session complete" : ready ? "Ready to close out" : "Finish remaining rounds first",
+    message: session.done
+      ? "You marked this charge cleared. Review anytime or start a new session."
+      : !allPhases
+        ? "Complete all four rounds before the charge test counts."
+        : !hasReflection
+          ? "Close your eyes, revisit the memory, then write what you feel now."
+          : "If the memory brings gratitude or neutrality, mark complete. If still activated, go back or ask the coach.",
+    canMarkComplete: ready,
+  };
+}
+
 // ---------------------------------------------------------------- completion
 function Completion({ session, update, onHome }) {
   const e = session.entries;
+  const completionStatus = getCompletionProceedStatus(session);
   return (
     <div className="cl-fade">
       <p className="cl-ui" style={{ margin: 0, fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: T.volt }}>
@@ -952,6 +1103,42 @@ function Completion({ session, update, onHome }) {
       <p className="cl-ui" style={{ fontSize: 15, color: T.gray, lineHeight: 1.65, maxWidth: 560 }}>
         Close your eyes. Return to the moment with {session.person}. Hold everything at once: costs and benefits, opposition and support, reality and fantasy. Then answer honestly.
       </p>
+
+      <div
+        style={{
+          marginTop: 20,
+          borderRadius: 18,
+          padding: "18px 20px",
+          border: `2px solid ${completionStatus.ready ? T.volt : T.line}`,
+          background: completionStatus.ready ? T.voltDim : T.surface,
+        }}
+      >
+        <p className="cl-display" style={{ margin: 0, fontSize: 18, fontWeight: 800, color: completionStatus.ready ? T.volt : T.white }}>
+          {completionStatus.headline}
+        </p>
+        <p className="cl-ui" style={{ margin: "10px 0 14px", fontSize: 14, lineHeight: 1.6, color: completionStatus.ready ? T.offWhite : T.gray }}>
+          {completionStatus.message}
+        </p>
+        <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+          {completionStatus.criteria.map((c) => (
+            <li key={c.label} className="cl-ui" style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+              <span
+                style={{
+                  width: 20, height: 20, borderRadius: 99, display: "grid", placeItems: "center", fontSize: 11, fontWeight: 800, flexShrink: 0,
+                  background: c.met === true ? T.volt : c.met === false ? T.surfaceRaised : "transparent",
+                  color: c.met === true ? T.black : T.gray,
+                  border: `2px solid ${c.met === true ? T.volt : c.met === false ? T.heat : T.grayDim}`,
+                }}
+              >
+                {c.met === true ? "✓" : c.met === false ? "!" : "?"}
+              </span>
+              <span style={{ color: c.met === true ? T.white : T.gray, flex: 1 }}>{c.label}</span>
+              <span style={{ color: T.grayDim, fontSize: 12, fontWeight: 600 }}>{c.detail}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
       <div style={{ background: T.surface, border: `1px solid ${T.line}`, borderRadius: 20, padding: 22, margin: "22px 0" }}>
         <p className="cl-ui" style={{ fontSize: 15, fontWeight: 700, color: T.white, margin: "0 0 10px" }}>
           When you revisit the memory now, what do you feel?
@@ -964,11 +1151,24 @@ function Completion({ session, update, onHome }) {
           className="cl-ui"
           style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${T.line}`, borderRadius: 14, padding: "14px 16px", fontSize: 15, lineHeight: 1.55, background: T.charcoal, color: T.white, resize: "vertical" }}
         />
-        <div style={{ display: "flex", gap: 12, marginTop: 16, flexWrap: "wrap" }}>
+        <p className="cl-ui" style={{ margin: "16px 0 0", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
+          {completionStatus.canMarkComplete
+            ? "Mark complete only if revisiting the memory feels clear, not if you are filling the form."
+            : "Finish the checklist above before marking this session complete."}
+        </p>
+        <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
           <button
             onClick={() => update({ done: true })}
+            disabled={!completionStatus.canMarkComplete}
             className="cl-ui cl-btn"
-            style={btnBase({ background: T.volt, color: T.black, border: "none", padding: "13px 22px" })}
+            style={btnBase({
+              background: completionStatus.canMarkComplete ? T.volt : T.surfaceRaised,
+              color: completionStatus.canMarkComplete ? T.black : T.grayDim,
+              border: "none",
+              padding: "13px 22px",
+              cursor: completionStatus.canMarkComplete ? "pointer" : "default",
+              boxShadow: completionStatus.canMarkComplete ? `0 0 24px ${T.volt}44` : "none",
+            })}
           >
             Charge cleared
           </button>
@@ -977,7 +1177,7 @@ function Completion({ session, update, onHome }) {
             className="cl-ui cl-btn"
             style={btnBase({ background: "transparent", color: T.white, border: `1px solid ${T.line}`, padding: "13px 22px" })}
           >
-            Still activated
+            Still activated, go deeper
           </button>
         </div>
         {session.done && (
@@ -1249,25 +1449,33 @@ export default function ChargeLedger() {
               </button>
             </div>
 
-            <nav className="cl-ui" aria-label="Phases" style={{ display: "flex", gap: 8, marginBottom: 28, flexWrap: "wrap" }}>
+            <nav className="cl-ui" aria-label="Phases" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
               {[...PHASES.map((p, i) => ({ label: p.num, title: p.title, i })), { label: "05", title: "Test", i: 4 }].map((tab) => {
                 const isDone = tab.i < 4 ? phaseComplete(PHASES[tab.i], active) : active.done;
                 const isCurrent = step === tab.i;
                 return (
                   <button key={tab.i} onClick={() => setStep(tab.i)} aria-current={isCurrent ? "step" : undefined} className="cl-btn"
-                    title={tab.title}
+                    title={isDone ? `${tab.title}: complete` : `${tab.title}: in progress`}
                     style={{
                       minWidth: 52, height: 44, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: "pointer",
                       fontFamily: "'Barlow Condensed', sans-serif", letterSpacing: "0.04em",
                       border: `2px solid ${isCurrent ? T.volt : isDone ? T.volt + "66" : T.line}`,
                       background: isCurrent ? T.voltDim : isDone ? "rgba(212,255,0,0.08)" : T.surface,
                       color: isCurrent ? T.volt : isDone ? T.volt : T.grayDim,
+                      position: "relative",
                     }}>
-                    {tab.label}
+                    {isDone ? "✓" : tab.label}
                   </button>
                 );
               })}
             </nav>
+            {step < 4 && (
+              <p className="cl-ui" style={{ margin: "0 0 20px", fontSize: 12, color: T.gray, lineHeight: 1.5 }}>
+                {phaseComplete(PHASES[step], active)
+                  ? "This round is complete. Use the panel below or the sticky button when you are ready to move on."
+                  : `Complete the checklist below to unlock the next round. Minimum: ${MIN_ENTRIES} honest reps per phase.`}
+              </p>
+            )}
 
             {step < 4 ? (
               <div className="cl-fade" key={step}>
@@ -1286,6 +1494,8 @@ export default function ChargeLedger() {
 
                 <PhaseBody phase={PHASES[step]} session={active} update={update} />
 
+                <ProceedPanel phase={PHASES[step]} session={active} />
+
                 <CoachPanel
                   session={active}
                   phaseKey={PHASES[step].key}
@@ -1296,21 +1506,32 @@ export default function ChargeLedger() {
                   onUpdate={update}
                 />
 
-                <div className="cl-sticky-bar" style={{ display: "flex", justifyContent: "space-between", marginTop: 32, gap: 12, padding: "16px 0", background: "rgba(10,10,10,0.9)", borderTop: `1px solid ${T.line}`, bottom: 0 }}>
-                  <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="cl-ui cl-btn"
-                    style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: step === 0 ? T.grayDim : T.white, padding: "12px 22px", cursor: step === 0 ? "default" : "pointer" })}>
-                    Back
-                  </button>
-                  <button onClick={() => setStep(step + 1)} className="cl-ui cl-btn"
-                    style={btnBase({
-                      background: phaseComplete(PHASES[step], active) ? T.volt : "transparent",
-                      color: phaseComplete(PHASES[step], active) ? T.black : T.gray,
-                      border: `1px solid ${phaseComplete(PHASES[step], active) ? T.volt : T.line}`,
-                      padding: "12px 28px",
-                    })}>
-                    {phaseComplete(PHASES[step], active) ? "Next round →" : "Skip ahead"}
-                  </button>
-                </div>
+                {(() => {
+                  const proceed = getPhaseProceedStatus(PHASES[step], active);
+                  return (
+                    <div className="cl-sticky-bar" style={{ marginTop: 32, padding: "14px 0 18px", background: "rgba(10,10,10,0.92)", borderTop: `1px solid ${proceed.ready ? T.volt + "55" : T.line}`, bottom: 0 }}>
+                      <p className="cl-ui" style={{ margin: "0 0 12px", fontSize: 12, fontWeight: 600, color: proceed.ready ? T.volt : T.gray, textAlign: "center", letterSpacing: "0.04em" }}>
+                        {proceed.ready ? "Requirements met. Tap below when you are ready for the next round." : proceed.message}
+                      </p>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                        <button onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0} className="cl-ui cl-btn"
+                          style={btnBase({ background: "transparent", border: `1px solid ${T.line}`, color: step === 0 ? T.grayDim : T.white, padding: "12px 22px", cursor: step === 0 ? "default" : "pointer" })}>
+                          Back
+                        </button>
+                        <button onClick={() => setStep(step + 1)} className="cl-ui cl-btn"
+                          style={btnBase({
+                            background: proceed.ready ? T.volt : "transparent",
+                            color: proceed.ready ? T.black : T.grayDim,
+                            border: `2px solid ${proceed.ready ? T.volt : T.line}`,
+                            padding: "12px 28px",
+                            boxShadow: proceed.ready ? `0 0 24px ${T.volt}44` : "none",
+                          })}>
+                          {proceed.nextLabel}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <Completion session={active} update={update} onHome={() => setView("home")} />
