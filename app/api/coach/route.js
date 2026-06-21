@@ -31,7 +31,7 @@ export async function POST(request) {
       return Response.json({ error: { message: "Messages must have role and content." } }, { status: 400 });
     }
     payload = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 2000,
       system,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -42,7 +42,7 @@ export async function POST(request) {
       return Response.json({ error: { message: "A prompt string is required." } }, { status: 400 });
     }
     payload = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 1000,
       messages: [{ role: "user", content: prompt }],
     };
